@@ -1,0 +1,1985 @@
+<?php
+// $Id$
+require_once("anai_chpvalet.inc");
+require_once("anai_chpvalet_checkouts.inc");
+require_once("anai_chpvalet_announced.inc");
+require_once("anai_chpvalet_pickup.inc");
+require_once("anai_chpvalet_codes.inc");
+require_once("anai_chpvalet_vas.inc");
+require_once("anai_chpvalet_printer.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * Valet Management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpvalet_perm() {
+  return array('anai chp add valets',
+	       'anai chp list valets',
+	       'anai chp edit valets',
+	       'anai chp delete valets',
+	       'anai chp add valet codes',
+	       'anai chp list valet codes',
+	       'anai chp edit valet codes',
+	       'anai chp delete valet codes',
+	       'anai chp add valet vas',
+	       'anai chp list valet vas',
+	       'anai chp edit valet vas',
+	       'anai chp delete valet vas',
+	       'anai chp config valet printer',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpvalet_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpvalet_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_checkouts_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_announced_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_prepared_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_pickup_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_codes_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpvalet_vas_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpvalet_menu() {
+  $items = array();
+  $items['chpvaletlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_list_form'),
+     'access arguments' => array('anai chp list valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_add_form'),
+     'access arguments' => array('anai chp add valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletcheckouts'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_checkouts_form'),
+     'access arguments' => array('anai chp list valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletannounced'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_announced_form'),
+     'access arguments' => array('anai chp list valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletprepared'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_prepared_form'),
+     'access arguments' => array('anai chp list valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletpickup'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_pickup_form'),
+     'access arguments' => array('anai chp list valets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletcodes'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_codes_form'),
+     'access arguments' => array('anai chp list valet codes'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletcodeadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_codes_add_form'),
+     'access arguments' => array('anai chp add valet codes'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletvas'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_vas_form'),
+     'access arguments' => array('anai chp list valet vas'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletvasadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_vas_add_form'),
+     'access arguments' => array('anai chp add valet vas'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpvaletprint'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpvalet_printer_form'),
+     'access arguments' => array('anai chp config valet printer'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Valet list
+ ********** Address: chpvaletlist
+ ********** Access:  'anai chp list valets'
+ *********/
+
+
+
+function chpvalet_list_form($form_state) {
+  if ($form_state['storage']['valet_view']) {
+    return chpvalet_list_view_form($form_state);
+  }
+  if ($form_state['storage']['valet_edit']) {
+    return chpvalet_list_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Valets'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  //$settings['show_all_lots'] = FALSE; // Default value
+  $settings['policy_filter'] = array('ValetPolicy');
+  $settings['buttons']['back']['submit'] = 'chpvalet_list_form_submit_back';
+  if (user_access('anai chp add valets')) {
+    $settings['buttons']['add']['submit'] = 'chpvalet_list_form_submit_add';
+  }
+  if (user_access('anai chp config valet printer')) {
+    $settings['buttons']['printer']['validate'] = 'chpvalet_list_form_validate_printer';
+    $settings['buttons']['printer']['submit'] = 'chpvalet_list_form_submit';
+  }
+  if (user_access('anai chp list valet codes')) {
+    $settings['buttons']['options']['validate'] = 'chpvalet_list_form_validate_codes';
+    $settings['buttons']['options']['submit'] = 'chpvalet_list_form_submit';
+    $settings['buttons']['options']['suffix'] = '<p>';
+  }
+  $settings['buttons']['checkouts']['title'] = t('Checkouts');
+  $settings['buttons']['checkouts']['validate'] = 'chpvalet_list_form_validate_checkouts';
+  $settings['buttons']['checkouts']['submit'] = 'chpvalet_list_form_submit';
+  $settings['buttons']['announced']['title'] = t('Messenger');
+  $settings['buttons']['announced']['validate'] = 'chpvalet_list_form_validate_announced';
+  $settings['buttons']['announced']['submit'] = 'chpvalet_list_form_submit';
+  $settings['buttons']['prepared']['title'] = t('Prepared');
+  $settings['buttons']['prepared']['validate'] = 'chpvalet_list_form_validate_prepared';
+  $settings['buttons']['prepared']['submit'] = 'chpvalet_list_form_submit';
+  $settings['buttons']['pickup']['title'] = t('Temporary picked up');
+  $settings['buttons']['pickup']['validate'] = 'chpvalet_list_form_validate_pickup';
+  $settings['buttons']['pickup']['submit'] = 'chpvalet_list_form_submit';
+  if (user_access('anai chp list valet vas')) {
+    $settings['buttons']['vas']['title'] = t('Services');
+    $settings['buttons']['vas']['validate'] = 'chpvalet_list_form_validate_vas';
+    $settings['buttons']['vas']['submit'] = 'chpvalet_list_form_submit';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+  $all_lots = $form_state['storage']['ajax']['all_lots'];
+
+  $policy = chdbprop_get_policy($property_id, $lot_id);
+  $profile_id = $policy['ProfileId'];
+  $profile = chdbprop_get_profile($profile_id);
+
+  // Modify button availability from profile settings
+  if (!chpprop_property_allows_valet_messenger($profile)) {
+    unset($form['ajax']['announced']);
+  }
+  if (chpprop_property_disables_valet_checkout($profile)) {
+    unset($form['ajax']['checkouts']);
+    unset($form['ajax']['prepared']);
+    unset($form['ajax']['pickup']);
+  }
+  if (chpprop_property_disables_valet_codes($profile)) {
+    unset($form['ajax']['codes']);
+  }
+
+  $valets = chdbvalet_get_valets($company_id, $property_id, $lot_id, TRUE, TRUE, 'CheckIn');
+
+  if (sizeof($valets) == 0) {
+    $form['ajax']['empty'] =
+      array('#value' => '<p>'.t('Empty. No valets registered.').'<p>');
+    return $form;
+  }
+
+  $form['ajax']['list'] = chpvalet_list_table_form($valets);
+
+  return $form;
+}
+
+function chpvalet_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpvalet_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletadd';
+}
+
+function chpvalet_list_form_validate_printer($form, &$form_state) {
+  $form_state['storage']['printer'] = TRUE;
+}
+
+function chpvalet_list_form_validate_checkouts($form, &$form_state) {
+  $form_state['storage']['checkouts'] = TRUE;
+}
+
+function chpvalet_list_form_validate_announced($form, &$form_state) {
+  $form_state['storage']['announced'] = TRUE;
+}
+
+function chpvalet_list_form_validate_prepared($form, &$form_state) {
+  $form_state['storage']['prepared'] = TRUE;
+}
+
+function chpvalet_list_form_validate_pickup($form, &$form_state) {
+  $form_state['storage']['pickup'] = TRUE;
+}
+
+function chpvalet_list_form_validate_codes($form, &$form_state) {
+  $form_state['storage']['codes'] = TRUE;
+}
+
+function chpvalet_list_form_validate_vas($form, &$form_state) {
+  $form_state['storage']['vas'] = TRUE;
+}
+
+function chpvalet_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpvalet_list_table');
+
+  $looper = 0;
+  foreach ($entries as $entry) {
+    $checkin = chpuser_datetime_utc_to_usertimezone($entry['CheckinTime']);
+    $form['db']['checkin_'.$looper] = array('#value' => $checkin->format("M j,y H:i"));
+
+    $form['db']['lpn_'.$looper] = array('#value' => $entry['LPN']);
+    $form['db']['make_'.$looper] = array('#value' => $entry['Make']);
+    $form['db']['model_'.$looper] = array('#value' => $entry['Model']);
+    $form['db']['color_'.$looper] = array('#value' => $entry['Color']);
+
+    $expected = chpuser_datetime_utc_to_usertimezone($entry['CheckoutTime']);
+    $form['db']['expected_'.$looper] = array('#value' => $expected->format("M j,y"));
+
+    $form['db']['view_'.$looper] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	    '#name' => 'op_view'.$entry['Id'],
+	    '#submit' => array('chpvalet_list_form_submit'));
+
+    if (user_access('anai chp edit valets')) {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$entry['Id'],
+	      '#submit' => array('chpvalet_list_form_submit'));
+    }
+
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpvalet_list_table($form) {
+  // Table Header
+  $header = array('Checked in', 'LPN', 'Make', 'Model', 'Color', 'Expected',
+		  '', '');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'checkin_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('checkin_'));
+    $rows[] = array(drupal_render($form['checkin_'.$looper]),
+		    drupal_render($form['lpn_'.$looper]),
+		    drupal_render($form['make_'.$looper]),
+		    drupal_render($form['model_'.$looper]),
+		    drupal_render($form['color_'.$looper]),
+		    drupal_render($form['expected_'.$looper]),
+		    array('data' => drupal_render($form['view_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpvalet_list_view_form($form_state) {
+  drupal_set_title(t('Valet details'));
+  global $user;
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+  $property = chdbprop_get_property($property_id);
+  $policy = chdbprop_get_policy($property_id, $lot_id);
+  $profile_id = $policy['ProfileId'];
+  $profile = chdbprop_get_profile($profile_id);
+
+  $lpn = $valet['LPN'];
+
+  $form['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpvalet_list_view_form_validate_back'));
+
+  // Table Header
+  $header = array();
+  // Table Row
+  $rows[] = array('Reference', $valet['Reference']);
+  $rows[] = array('Current status', $valet['Status']);
+
+  $rows[] = array('ajax', $property['Alias']);
+  $rows[] = array('Lot', $policy['Alias']);
+
+  $time = chpuser_datetime_utc_to_usertimezone($valet['CheckinTime']);
+  $rows[] = array('Checked in', $time->format("M j,y H:i"));
+
+  if ($valet['Active']) {
+    $time = chpuser_datetime_utc_to_usertimezone($valet['CheckoutTime']);
+    $rows[] = array('Estimatet checkout', $time->format("M j,y H:i"));
+  } else {
+    $time = chpuser_datetime_utc_to_usertimezone($valet['CheckoutTime']);
+    $rows[] = array('Checked out', $time->format("M j,y H:i"));
+  }
+
+  if (chpprop_property_allows_valet_messenger($profile) and
+      strlen($valet['AnnounceTime']) > 0) {
+    $time = chpuser_datetime_utc_to_usertimezone($valet['AnnounceTime']);
+    $rows[] = array('Announced via Messanger', $time->format("M j,y H:i"));
+  }
+
+  if (!chpprop_property_disables_valet_checkout($profile) and
+      strlen($valet['PrepareTime']) > 0) {
+    $time = chpuser_datetime_utc_to_usertimezone($valet['PrepareTime']);
+    $rows[] = array('Prepared for pickup', $time->format("M j,y H:i"));
+  }
+
+  if (!chpprop_property_disables_valet_checkout($profile) and
+      strlen($valet['PickupTime']) > 0) {
+    $time = chpuser_datetime_utc_to_usertimezone($valet['PickupTime']);
+    $rows[] = array('Temporary picked up', $time->format("M j,y H:i"));
+  }
+
+  $rows[] = array('LPN', $lpn);
+  $rows[] = array('Make', $valet['Make']);
+  $rows[] = array('Model', $valet['Model']);
+  $rows[] = array('Color', $valet['Color']);
+
+  if (!chpprop_property_disables_valet_codes($profile)) {
+    $rows[] = array('Valet code', $valet['Code']);
+    $rows[] = array('Valet description', $valet['Description']);
+    $rows[] = array('Valet cost', $valet['Amount']);
+  }
+
+  if (strlen($valet['FirstName']) > 0) {
+    $rows[] = array('First name', $valet['FirstName']);
+  }
+
+  if (strlen($valet['LastName']) > 0) {
+    $rows[] = array('Last name', $valet['LastName']);
+  }
+
+  if (strlen($valet['Phone']) > 0) {
+    $rows[] = array('Phone', $valet['Phone']);
+  }
+
+  if (strlen($valet['Street']) > 0) {
+    $rows[] = array('Street', $valet['Street']);
+  }
+
+  if (strlen($valet['City']) > 0) {
+    $rows[] = array('City', $valet['City']);
+  }
+
+  if (strlen($valet['PostalCode']) > 0) {
+    $rows[] = array('Postal Code', $valet['PostalCode']);
+  }
+
+  if (strlen($valet['Country']) > 0) {
+    $rows[] = array('Country', $valet['Country']);
+  }
+
+  $damages = array();
+  foreach (chdbvalet_get_damages
+	   ($company_id, $property_id, $lot_id, $lpn) as $damage) {
+    $damages[] = array($damage['Place'], $damage['Damage']);
+  }
+  if (sizeof($damages) > 0) {
+    $rows[] = array('Damages', theme_table(array('Place', 'Damage'), $damages));
+  }
+
+  $services = array();
+  foreach (chdbvalet_get_valetvas
+	   ($company_id, $property_id, $lot_id, $lpn) as $service) {
+    $services[] = array($service['Offer'], $service['Choice'], $service['Amount']);
+  }
+  if (sizeof($services) > 0) {
+    $rows[] = array('Services', theme_table(array('Offer', 'Choice', 'Amount'), $services));
+  }
+
+  $table = theme_table($header, $rows);
+  $form['info'] = array('#value' => $table);
+  return $form;
+}
+
+function chpvalet_list_view_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpvalet_list_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form($form, 'Are you sure?', 'chpvaletlist',
+			'The valet will be deleted from the system.');
+  }
+  if (isset($form_state['storage']['damages'])) {
+    return chpvalet_list_edit_damages_form($form_state);
+  }
+  if (isset($form_state['storage']['services'])) {
+    return chpvalet_list_edit_services_form($form_state);
+  }
+
+  drupal_set_title(t('Edit valet'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+
+  $lpn = $valet['LPN'];
+  $make = $valet['Make'];
+  $model = $valet['Model'];
+  $color = $valet['Color'];
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  $options = array();
+  $options['Details'] = t('Edit valet details');
+  $options['Status'] = t('Update valet status');
+  if (!isset($form_state['storage']['ajax']['Type'])) {
+    $form_state['storage']['ajax']['Type'] = key($options);
+  }
+  $form['ajax']['Type'] =
+    array('#type' => 'radios',
+	  '#title' => t('Action'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Type'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ($form_state['storage']['ajax']['Type'] === 'Details') {
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $profile_id = $policy['ProfileId'];
+    $profile = chdbprop_get_profile($profile_id);
+
+    if (!chpprop_property_disables_valet_codes($profile)) {
+      // Retrieve valet codes dedicated for the property
+      $codes = array();
+      foreach (chdbvalet_get_codes($company_id,
+				   FALSE, // Template
+				   $property_id) as $code) {
+	if (!isset($codes[$code['Code']])) {
+	  $codes[$code['Code']] = $code;
+	}
+      }
+      // Add up any template
+      foreach (chdbvalet_get_codes($company_id,
+				   TRUE, // Template
+				   FALSE) as $code) {
+	if (!isset($codes[$code['Code']])) {
+	  $codes[$code['Code']] = $code;
+	}
+      }
+      // Create the options
+      $code_options = array();
+      foreach ($codes as $code => $value) {
+	$code_options[$code] = $value['Code'];
+      }
+      $descriptions = array();
+      foreach ($codes as $code => $value) {
+	$descriptions[$code] = $value['Description'];
+      }
+      $amounts = array();
+      foreach ($codes as $code => $value) {
+	$amounts[$code] = $value['Amount'];
+      }
+
+      if (sizeof($codes) == 0) {
+	$form['ajax']['emptycodes'] =
+	  array('#value' => '<p><p>'.t('Empty. You must register valet codes first.').'<p>');
+	return $form;
+      }
+
+      // Layout valet code
+      if (!isset($form_state['storage']['ajax']['Code'])) {
+	$form_state['storage']['ajax']['Code'] = $valet['Code'];
+      }
+      if ($form_state['storage']['ajax']['Code'] !==
+	  $form_state['storage']['ajax']['OldCode']) {
+	unset($form_state['storage']['ajax']['Amount']);
+      }
+      $form_state['storage']['ajax']['OldCode'] =
+	$form_state['storage']['ajax']['Code'];
+      $form['ajax']['OldCode'] =
+	array('#type' => 'hidden',
+	      '#value' => $form_state['storage']['ajax']['OldCode']);
+      $form['ajax']['Code'] =
+	array('#type' => 'select',
+	      '#title' => t('Valet code'),
+	      '#options' => $code_options,
+	      '#default_value' => $form_state['storage']['ajax']['Code'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+
+      // Layout valet description
+      $form_state['storage']['ajax']['Description'] =
+	$descriptions[$form_state['storage']['ajax']['Code']];
+      $form['ajax']['Description'] =
+	array('#type' => 'hidden',
+	      '#value' => $form_state['storage']['ajax']['Description']);
+      $form['ajax']['StaticDescription'] =
+	array('#type' => 'textfield',
+	      '#title' => t('Valet description'),
+	      '#maxlength' => 80,
+	      '#disabled' => TRUE,
+	      '#default_value' => $form_state['storage']['ajax']['Description'],
+	      '#field_suffix' => theme('image', 'misc/watchdog-ok.png'));
+
+      // Layout valet amount
+      if (!isset($form_state['storage']['ajax']['Amount'])) {
+	$form_state['storage']['ajax']['Amount'] =
+	  $amounts[$form_state['storage']['ajax']['Code']];
+      }
+      $form['ajax']['Amount'] =
+	array('#type' => 'textfield',
+	      '#title' => t('Amount'),
+	      '#maxlength' => 10,
+	      '#description' => 'Format: X.XX',
+	      '#default_value' => $form_state['storage']['ajax']['Amount'],
+	      '#ahah' => array('event' => 'blur',
+			       'path' => ahah_helper_path(array('ajax', 'Amount')),
+			       'wrapper' => 'edit-property-Amount-wrapper',
+			       'effect' => 'none',
+			       'method' => 'replace'));
+
+      if (isset($form_state['storage']['ajax']['Amount']) and 
+	  !empty($form_state['storage']['ajax']['Amount'])) {
+	$form['ajax']['Amount']['#field_suffix'] =
+	  theme('image',
+		(preg_match('/\d+\.\d{2}/', $form_state['storage']['ajax']['Amount'])) ?
+		'misc/watchdog-ok.png' : 'misc/watchdog-error.png');
+      }
+    }
+
+    // Layout CheckoutTime
+    if (!isset($form_state['storage']['ajax']['CheckoutTime'])) {
+      $time = chpuser_datetime_utc_to_usertimezone($valet['CheckoutTime']);
+      $form_state['storage']['ajax']['CheckoutTime'] = $time->format("Y-m-d H:i:s");
+    }
+    $form['ajax']['CheckoutTime'] =
+      array('#type' => 'textfield',
+	    '#default_value' => $form_state['storage']['ajax']['CheckoutTime']);
+    drupal_add_js
+      ('(function ($) {
+          Drupal.behaviors.ANAIchpvalet=function(context){
+      	    $("#edit-ajax-CheckoutTime:not(.CheckoutTime-processed)",
+              context).addClass("CheckoutTime-processed")
+              .AnyTime_picker({format:"%Y-%m-%d %H:%i:%s",hideInput:true,
+                              placement:"inline",askSecond:false,
+                              labelTitle:"Checkout Date and Time"});
+          };
+       }(jQuery));', 'inline');
+
+    // Layout person
+    $settings = array();
+    $settings['tag'] = 'ajax';
+    $settings['subtag'] = 'person';
+    $settings['subframe'] = TRUE;
+    $settings['subframetitle'] = t('Person');
+    $settings['option']['skipnotrequired'] = TRUE;
+    $settings['option']['skipdepartment'] = TRUE;
+    $settings['option']['skiprole'] = TRUE;
+    $settings['option']['skiptitle'] = TRUE;
+    $settings['option']['skipemail'] = TRUE;
+    $settings['option']['skipemailnotification'] = TRUE;
+    $settings['option']['skiplogin'] = TRUE;
+    $settings['default']['FirstName'] = $valet['FirstName'];
+    $settings['default']['LastName'] = $valet['LastName'];
+    $settings['default']['Phone'] = $valet['Phone'];
+    $settings['default']['Street'] = $valet['Street'];
+    $settings['default']['City'] = $valet['City'];
+    $settings['default']['PostalCode'] = $valet['PostalCode'];
+    $settings['default']['Province'] = $valet['Province'];
+    $settings['default']['Country'] = $valet['Country'];
+    chpprop_produce_person($form, $form_state, $settings);
+
+    // Layout vehicle
+    $settings = array();
+    $settings['tag'] = 'ajax';
+    $settings['subtag'] = 'vehicle';
+    $settings['subframe'] = TRUE;
+    $settings['subframetitle'] = t('Vehicle');
+    $settings['default']['LPN'] = $lpn;
+    $settings['default']['Make'] = $make;
+    $settings['default']['Model'] = $model;
+    $settings['default']['Color'] = $color;
+    if (chpprop_produce_vehicle($form, $form_state, $settings)) {
+      return $form;
+    }
+
+    $damages = chdbvalet_get_damages($company_id, $property_id, $lot_id, $lpn);
+    $form['ajax']['damagebtn'] =
+      array('#type' => 'submit',
+	    '#value' => t('Edit damages'),
+	    '#validate' => array('chpvalet_list_edit_form_validate_damages'),
+	    '#submit' => array('chpvalet_list_form_submit'));
+
+    $services = chdbvalet_get_valetvas($company_id, $property_id, $lot_id, $lpn);
+    $form['ajax']['servicebtn'] =
+      array('#type' => 'submit',
+	    '#value' => t('Edit services'),
+	    '#validate' => array('chpvalet_list_edit_form_validate_services'),
+	    '#submit' => array('chpvalet_list_form_submit'));
+
+    $form['ajax']['footnote'] =
+      array('#value' => t('(*) Remember to save first if any changes on this page'));
+  }
+
+  if ($form_state['storage']['ajax']['Type'] === 'Status') {
+    $options = array();
+    $options['CheckIn'] = t('Checked in');
+    $options['Prepare'] = t('Prepared for pick up');
+    $options['PickUp'] = t('Temporary picked up');
+    $options['CheckOut'] = t('Checked out');
+    if (!isset($form_state['storage']['ajax']['Status'])) {
+      if (in_array($valet['Status'], array_keys($options))) {
+	$form_state['storage']['ajax']['Status'] = $valet['Status'];
+      } else {
+	$form_state['storage']['ajax']['Status'] = key($options);
+      }
+    }
+    $form['ajax']['Status'] =
+      array('#type' => 'radios',
+	    '#title' => t('Status'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Status']);
+  }
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpvalet_list_edit_form_validate_save'),
+	  '#submit' => array('chpvalet_list_form_submit'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpvalet_list_edit_form_submit_cancel'));
+
+  if (user_access('anai chp delete valets')) {
+    $form['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+	    '#validate' => array('chpvalet_list_edit_form_validate_delete'),
+	    '#submit' => array('chpvalet_list_form_submit'));
+  }
+  return $form;
+}
+
+function chpvalet_list_edit_form_validate_save($form, &$form_state) {
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chpvalet_list_edit_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletlist';
+}
+
+function chpvalet_list_edit_form_validate_damages($form, &$form_state) {
+  $form_state['storage']['damages'] = TRUE;
+}
+
+function chpvalet_list_edit_form_validate_services($form, &$form_state) {
+  $form_state['storage']['services'] = TRUE;
+}
+
+function chpvalet_list_edit_form_validate_delete($form, &$form_state) {
+  $form_state['storage']['delete'] = TRUE;
+}
+
+function chpvalet_list_edit_damages_form($form_state) {
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+
+  // Start new wrapper for damages
+  $form['damage'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Damages'),
+	  '#prefix' => '<div id="damage-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  $form['damage']['adddamagebtn'] =
+    array('#type' => 'button',
+	  '#value' => t('Add damage'),
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('damage')),
+			   'wrapper' => 'damage-wrapper'));
+
+  // List of included damages
+  if (!isset($form_state['storage']['damage']['DamageList'])) {
+    // Retrieve damages based on stored values
+    $damages = chdbvalet_get_damages($valet['CompanyId'],
+				     $valet['PropertyId'],
+				     $valet['LotId'],
+				     $valet['LPN']);
+    $form_state['storage']['damage']['DamageList'] = array();
+    foreach ($damages as $damage) {
+      $form_state['storage']['damage']['DamageList'][] =
+	array('Place' => $damage['Place'],
+	      'Damage' => $damage['Damage']);
+    }
+    $damages = $form_state['storage']['damage']['DamageList'];
+  } else {
+    $damages = unserialize($form_state['storage']['damage']['DamageList']);
+  }
+
+  // Place holder for button on top row
+  if (count($damages) > 0) {
+    $form['damage']['cleardamagebtn'] = array('#type' => 'hidden');
+  }
+
+  // Add damage form elements only when button is used
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') !== FALSE) {
+    unset($form['damage']['adddamagebtn']);
+    $options = array();
+    $options['Front'] = t('Front');
+    $options['Rear'] = t('Rear');
+    $options['Left side'] = t('Left side');
+    $options['Right side'] = t('Right side');
+    $options['Windshield'] = t('Windshield');
+    $options['Rear window'] = t('Rear window');
+    if (!isset($form_state['storage']['damage']['Place'])) {
+      $form_state['storage']['damage']['Place'] = key($options);
+    }
+    $form['damage']['Place'] =
+      array('#type' => 'select',
+	    '#title' => t('Place on vehicle'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['damage']['Place']);
+
+    $options = array();
+    $options['Scratch'] = t('Scratch');
+    $options['Bump'] = t('Bump');
+    $options['Other'] = t('Other');
+    if (!isset($form_state['storage']['damage']['Damage'])) {
+      $form_state['storage']['damage']['Damage'] = key($options);
+    }
+    $form['damage']['Damage'] =
+      array('#type' => 'select',
+	    '#title' => t('Damage'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['damage']['Damage']);
+    if (!isset($form_state['storage']['damage']['DamageOther'])) {
+      $form_state['storage']['damage']['DamageOther'] = '';
+    }
+    $form['damage']['DamageOther'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Damage other'),
+	    '#maxlength' => 80,
+	    '#default_value' => $form_state['storage']['damage']['DamageOther']);
+
+    $form['damage']['savedamagebtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Include'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('damage')),
+			     'wrapper' => 'damage-wrapper'));
+  }
+
+  // Whenever clear list button is used then clear list and remove the button
+  // (no point having a clear button when list is empty)
+  if (strpos($form_state['clicked_button']['#id'], 'cleardamagebtn') !== FALSE) {
+    $damages = array();
+    unset($form['damage']['cleardamagebtn']);
+  }
+
+  // Include damage in list when button is pressed
+  if (strpos($form_state['clicked_button']['#id'], 'savedamagebtn') !== FALSE) {
+
+    $damages[] =
+      array('Place' => $form_state['storage']['damage']['Place'],
+	    'Damage' =>
+	    ($form_state['storage']['damage']['Damage'] !== 'Other') ?
+	    $form_state['storage']['damage']['Damage'] :
+	    $form_state['storage']['damage']['DamageOther']);
+    unset($form_state['storage']['damage']['Place']);
+    unset($form_state['storage']['damage']['Damage']);
+    unset($form_state['storage']['damage']['DamageOther']);
+  }
+
+  // Replace the placeholder on top row with button as long as not in add-mode
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') === FALSE and
+      count($damages) > 0) {
+    $form['damage']['cleardamagebtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Clear table'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('damage')),
+			     'wrapper' => 'damage-wrapper'));
+  }
+
+  // Show the damage list as long as not in add-mode
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') === FALSE) {
+    if (count($damages) > 0) {
+      $header = array(t('Place'), t('Damage'));
+      $rows = array();
+      foreach ($damages as $damage) {
+    	$rows[] = array($damage['Place'], $damage['Damage']);
+      }
+      $form['damage']['ViewList'] = array('#value' => theme_table($header, $rows));
+    }
+  } else { // Remove placeholder when in add-mode
+    unset($form['damage']['cleardamagebtn']);
+  }
+
+  // Save damage list in hidden element to survive reloads
+  $form['damage']['DamageList'] =
+    array('#type' => 'hidden',
+	  '#value' => serialize($damages));
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#submit' => array('chpvalet_list_edit_damages_form_submit'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpvalet_list_edit_form_submit_cancel'));
+  
+  return $form;
+}
+
+function chpvalet_list_edit_damages_form_submit($form, &$form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+  $lpn = $valet['LPN'];
+
+  /* $company_id = $form_state['storage']['ajax']['CompanyId']; */
+  /* $property_id = $form_state['storage']['ajax']['PropertyId']; */
+  /* $lot_id = $form_state['storage']['ajax']['LotId']; */
+  /* $lpn = $form_state['values']['LPN']; */
+
+  $reference = $valet['Reference'];
+
+  // Delete old damages based on stored values
+  if (chdbvalet_delete_damages
+      ($valet['CompanyId'], $valet['LPN'])) {
+    drupal_set_message('Could not delete old damages', 'error');
+    return;
+  }
+
+  $damages = unserialize($form_state['values']['damage']['DamageList']);
+
+  foreach ($damages as $value) {
+    $place = $value['Place'];
+    $damage = $value['Damage'];
+    if (chdbvalet_insert_damage
+	($company_id, $property_id, $lot_id,
+	 $lpn, $reference, $place, $damage,
+	 $id)) {
+      drupal_set_message('Could not insert damage', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletlist';
+}
+
+function chpvalet_list_edit_services_form($form_state) {
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+  $lpn = $valet['LPN'];
+
+  /* $settings = array(); */
+  /* if (chpprop_produce_header(&$form, &$form_state, $settings)) { */
+  /*   return $form; */
+  /* } */
+  /* $_SESSION['TemporaryCompanyId'] = $form_state['storage']['ajax']['CompanyId']; */
+  /* $_SESSION['TemporaryPropertyId'] = $form_state['storage']['ajax']['PropertyId']; */
+  /* $_SESSION['TemporaryLotId'] = $form_state['storage']['ajax']['LotId']; */
+  /* $company_id = $form_state['storage']['ajax']['CompanyId']; */
+  /* $property_id = $form_state['storage']['ajax']['PropertyId']; */
+  /* $lot_id = $form_state['storage']['ajax']['LotId']; */
+
+  /* // Save newly modified LPN in a hidden element */
+  /* $lpn = $form_state['storage']['frequser']['LPN']; */
+  /* $form['LPN'] = */
+  /*   array('#type' => 'hidden', */
+  /* 	  '#value' => $lpn); */
+
+  // Retrieve dedicated services for the property
+  foreach (chdbvalet_get_vases($company_id,
+			       FALSE, // Template
+			       $property_id) as $vas) {
+    $services[$vas['Offer']][$vas['Choice']] = $vas['Amount'];
+  }
+  // Add up any template
+  foreach (chdbvalet_get_vases($company_id,
+			       TRUE, // Template
+			       FALSE) as $vas) {
+    $services[$vas['Offer']][$vas['Choice']] = $vas['Amount'];
+  }
+
+  // Start new wrapper for services
+  if (sizeof($services) > 0) {
+    $form['service'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Services'),
+	    '#prefix' => '<div id="service-wrapper">',
+	    '#suffix' => '</div>',
+	    '#tree' => TRUE);
+
+    $default = array();
+    foreach (chdbvalet_get_valetvas($company_id, $property_id, $lot_id, $lpn) as $vas) {
+      $default[$vas['Offer']][$vas['Choice'].'___'.$vas['Amount']] = TRUE;
+    }
+
+    foreach ($services as $offer => $choices) {
+      $options = array();
+      $options['None___0.00'] = t('None');
+      foreach ($choices as $choice => $amount) {
+	$options[$choice.'___'.$amount] = $choice.' ['.$amount.']';
+      }
+      if (!isset($form_state['storage']['service']['Offer'][$offer])) {
+	$form_state['storage']['service']['Offer'][$offer] =
+	  count($default[$offer]) > 0 ? key($default[$offer]) : key($options);
+      }
+      $form['service']['Offer'][$offer] =
+	array('#type' => 'radios',
+	      '#title' => $offer,
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['service']['Offer'][$offer]);
+    }
+  }
+
+  $form['save'] =
+    array('#type' => 'submit',
+	  '#value' => t('Save'),
+	  '#submit' => array('chpvalet_list_edit_services_form_submit'));
+
+  $form['cancel'] =
+    array('#type' => 'submit',
+	  '#value' => t('Cancel'),
+	  '#submit' => array('chpvalet_list_edit_form_submit_cancel'));
+  
+  return $form;
+}
+
+function chpvalet_list_edit_services_form_submit($form, &$form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $valet = chdbvalet_get_valet_id($id);
+  $company_id = $valet['CompanyId'];
+  $property_id = $valet['PropertyId'];
+  $lot_id = $valet['LotId'];
+  $lpn = $valet['LPN'];
+
+  /* $company_id = $form_state['storage']['ajax']['CompanyId']; */
+  /* $property_id = $form_state['storage']['ajax']['PropertyId']; */
+  /* $lot_id = $form_state['storage']['ajax']['LotId']; */
+  /* $lpn = $form_state['values']['LPN']; */
+
+  $reference = $valet['Reference'];
+
+  // Delete old services based on stored values
+  if (chdbvalet_delete_valetvases
+      ($valet['CompanyId'], $valet['LPN'])) {
+    drupal_set_message('Could not delete old services', 'error');
+    return;
+  }
+
+  $services = $form_state['values']['service']['Offer'];
+
+  foreach ($services as $offer => $value) {
+    $choice = substr($value, 0, strpos($value, '___'));
+    if ($choice === 'None') {
+      continue;
+    }
+    $amount = substr($value, strlen($choice) + 3);
+    if (chdbvalet_insert_valetvas
+	($company_id, $property_id, $lot_id,
+	 $lpn, $reference,
+	 $offer, $choice, $amount,
+	 $id)) {
+      drupal_set_message('Could not insert services', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletlist';
+}
+
+function chpvalet_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['damages']) {
+    return;
+  }
+  if ($form_state['storage']['services']) {
+    return;
+  }
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletlist';
+    return;
+  }
+  if ($form_state['storage']['checkouts']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletcheckouts';
+    return;
+  }
+  if ($form_state['storage']['announced']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletannounced';
+    return;
+  }
+  if ($form_state['storage']['prepared']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletprepared';
+    return;
+  }
+  if ($form_state['storage']['pickup']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletpickup';
+    return;
+  }
+  if ($form_state['storage']['codes']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletcodes';
+    return;
+  }
+  if ($form_state['storage']['vas']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletvas';
+    return;
+  }
+  if ($form_state['storage']['printer']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletprint';
+    return;
+  }
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    $valet = chdbvalet_get_valet_id($id);
+    $company_id = $valet['CompanyId'];
+    $lpn = $valet['LPN'];
+    if (chdbvalet_delete_valet_id($id)) {
+      drupal_set_message('Could not delete valet', 'error');
+      return;
+    }
+    if (chdbvalet_delete_damages($company_id, $lpn)) {
+      drupal_set_message('Could not delete damages', 'error');
+      return;
+    }
+    if (chdbvalet_delete_valetvases($company_id, $lpn)) {
+      drupal_set_message('Could not delete services', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletlist';
+    return;
+  }
+  if ($form_state['storage']['delete']) {
+    unset($form_state['storage']['delete']);
+    $form_state['storage']['confirm_delete'] = TRUE;
+    return;
+  }
+  if ($form_state['storage']['save']) {
+    $id = $form_state['storage']['id'];
+    $valet = chdbvalet_get_valet_id($id);
+
+    $company_id = $valet['CompanyId'];
+    $property_id = $valet['PropertyId'];
+    $lot_id = $valet['LotId'];
+
+    $type = $form_state['values']['ajax']['Type'];
+
+    if ($type === 'Details') {
+      $lpn = $form_state['values']['ajax']['vehicle']['LPN'];
+      $make = $form_state['values']['ajax']['vehicle']['Make'];
+      $model = $form_state['values']['ajax']['vehicle']['Model'];
+      $color = $form_state['values']['ajax']['vehicle']['Color'];
+
+      $code = $form_state['values']['ajax']['Code'];
+      $description = $form_state['values']['ajax']['Description'];
+      $amount = $form_state['values']['ajax']['Amount'];
+
+      $time = chpuser_datetime_usertimezone_to_utc
+	($form_state['values']['ajax']['CheckoutTime']);
+      $checkout_time = $time->format("Y-m-d H:i:s");
+
+      if (chdbvalet_update_receipt
+	  ($id,
+	   $lpn, $make, $model, $color,
+	   $code, $description, $amount,
+	   $checkout_time)) {
+	drupal_set_message('Could not update valet', 'error');
+	return;
+      }
+
+      $first_name = $form_state['values']['ajax']['person']['FirstName'];
+      $last_name = $form_state['values']['ajax']['person']['LastName'];
+      $phone = $form_state['values']['ajax']['person']['Phone'];
+      $street = $form_state['values']['ajax']['person']['Street'];
+      $city = $form_state['values']['ajax']['person']['City'];
+      $postal_code = $form_state['values']['ajax']['person']['PostalCode'];
+      $province = $form_state['values']['ajax']['person']['Province'];
+      $country = chpprop_retrieve_country($form_state['values']['ajax']['person']['Country']);
+
+      if (chdbvalet_update_receipt_person
+	  ($id,
+	   $first_name, $last_name, $phone,
+	   $street, $city, $postal_code,
+	   $province, $country)) {
+	drupal_set_message('Could not update valet person', 'error');
+	return;
+      }
+
+      if (chdbprop_update_freq_user_person
+	  ($lpn,
+	   $first_name, $last_name, $phone,
+	   $street, $city, $postal_code,
+	   $province, $country)) {
+	drupal_set_message('Could not update freq user person', 'error');
+	return;
+      }
+    }
+
+    if ($type === 'Status') {
+      $lpn = $valet['LPN'];
+      $status = $form_state['values']['ajax']['Status'];
+
+      if ($status === 'CheckIn') {
+	chdbvalet_update_status_checkin($id);
+      } elseif ($status === 'CheckOut') {
+	chdbvalet_update_status_checkout($id);
+      } elseif ($status === 'Prepare') {
+	chdbvalet_update_status_prepare($id);
+      } elseif ($status === 'PickUp') {
+	chdbvalet_update_status_pickup($id);
+      }
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletlist';
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_view')) {
+      $id = substr($key, strlen('op_view'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed view of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['valet_view'] = TRUE;
+    return;
+  }
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['valet_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Valet add
+ ********** Address: chpvaletadd
+ ********** Access:  'anai chp add valets'
+ *********/
+
+
+
+function chpvalet_add_form($form_state) {
+  if (isset($form_state['storage']['continue'])) {
+    return chpvalet_add_continue_form($form_state);
+  }
+
+  drupal_set_title(t('Add valet'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+  $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+  $profile_id = $policy['data']['ProfileId'];
+  $profile = chdbprop_get_profile($profile_id);
+
+  /* // Create patroller options */
+  /* $patroller_options = array(); */
+  /* $patrollers = chpprop_retrieve_patrollers($user->uid, $company_id, $property_id); */
+  /* foreach ($patrollers as $patroller_id => $patroller) { */
+  /*   $patroller_options[$patroller_id] = $patroller_id; */
+  /* } */
+  /* $patrollers = NULL; */
+
+  /* if (empty($patroller_options)) { */
+  /*   $patroller_options['Unspecified'] = t('Unspecified'); */
+  /* } */
+
+  /* // Layout patrollers */
+  /* if ($form_state['storage']['ajax']['CompanyChanged'] or */
+  /*     $form_state['storage']['ajax']['PropertyChanged']) { */
+  /*   unset($form_state['storage']['ajax']['PatrollerId']); */
+  /* } */
+  /* if (!isset($form_state['storage']['ajax']['PatrollerId'])) { */
+  /*   $form_state['storage']['ajax']['PatrollerId'] = key($patroller_options); */
+  /* } */
+  /* $form['ajax']['PatrollerId'] = */
+  /*   array('#type' => 'select', */
+  /* 	  '#title' => t('Patroller'), */
+  /* 	  '#options' => $patroller_options, */
+  /* 	  '#default_value' => $form_state['storage']['ajax']['PatrollerId']); */
+
+  if (!chpprop_property_disables_valet_codes($profile)) {
+    // Retrieve valet codes dedicated for the property
+    $codes = array();
+    foreach (chdbvalet_get_codes($company_id,
+				 FALSE, // Template
+				 $property_id) as $code) {
+      if (!isset($codes[$code['Code']])) {
+	$codes[$code['Code']] = $code;
+      }
+    }
+    // Add up any template
+    foreach (chdbvalet_get_codes($company_id,
+				 TRUE, // Template
+				 FALSE) as $code) {
+      if (!isset($codes[$code['Code']])) {
+	$codes[$code['Code']] = $code;
+      }
+    }
+    // Create the options
+    $code_options = array();
+    foreach ($codes as $code => $value) {
+      $code_options[$code] = $value['Code'];
+    }
+    $descriptions = array();
+    foreach ($codes as $code => $value) {
+      $descriptions[$code] = $value['Description'];
+    }
+    $amounts = array();
+    foreach ($codes as $code => $value) {
+      $amounts[$code] = $value['Amount'];
+    }
+
+    if (empty($codes)) {
+      $form['ajax']['emptycodes'] =
+	array('#value' => '<p><p>'.t('Valet codes yet to be configured, impossible to continue.').'<p>');
+      $form['cancel'] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpvalet_add_form_submit_cancel'));
+      return $form;
+    }
+
+    // Layout valet code
+    if ($form_state['storage']['ajax']['CompanyChanged'] or
+	$form_state['storage']['ajax']['PropertyChanged']) {
+      unset($form_state['storage']['ajax']['Code']);
+      unset($form_state['storage']['ajax']['Amount']);
+    }
+    if (!isset($form_state['storage']['ajax']['Code'])) {
+      $form_state['storage']['ajax']['Code'] = key($code_options);
+    }
+    if ($form_state['storage']['ajax']['Code'] !==
+	$form_state['storage']['ajax']['OldCode']) {
+      unset($form_state['storage']['ajax']['Amount']);
+    }
+    $form_state['storage']['ajax']['OldCode'] =
+      $form_state['storage']['ajax']['Code'];
+    $form['ajax']['OldCode'] =
+      array('#type' => 'hidden',
+	    '#value' => $form_state['storage']['ajax']['OldCode']);
+    $form['ajax']['Code'] =
+      array('#type' => 'select',
+	    '#title' => t('Valet code'),
+	    '#options' => $code_options,
+	    '#default_value' => $form_state['storage']['ajax']['Code'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    // Layout valet description
+    $form_state['storage']['ajax']['Description'] =
+      $descriptions[$form_state['storage']['ajax']['Code']];
+    $form['ajax']['Description'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Valet description'),
+	    '#maxlength' => 80,
+	    '#disabled' => TRUE,
+	    '#default_value' => $form_state['storage']['ajax']['Description'],
+	    '#field_suffix' => theme('image', 'misc/watchdog-ok.png'));
+
+    // Layout valet amount
+    if (!isset($form_state['storage']['ajax']['Amount'])) {
+      $form_state['storage']['ajax']['Amount'] =
+	$amounts[$form_state['storage']['ajax']['Code']];
+    }
+    $form['ajax']['Amount'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Amount'),
+	    '#maxlength' => 10,
+	    '#description' => 'Format: X.XX',
+	    '#default_value' => $form_state['storage']['ajax']['Amount'],
+	    '#ahah' => array('event' => 'blur',
+			     'path' => ahah_helper_path(array('ajax', 'Amount')),
+			     'wrapper' => 'edit-property-Amount-wrapper',
+			     'effect' => 'none',
+			     'method' => 'replace'));
+
+    if (isset($form_state['storage']['ajax']['Amount']) and 
+	!empty($form_state['storage']['ajax']['Amount'])) {
+      $form['ajax']['Amount']['#field_suffix'] =
+	theme('image',
+	      (preg_match('/\d+\.\d{2}/', $form_state['storage']['ajax']['Amount'])) ?
+	      'misc/watchdog-ok.png' : 'misc/watchdog-error.png');
+    }
+  }
+
+  // Layout CheckoutTime
+  $form['ajax']['CheckoutTime'] = array('#type' => 'textfield');
+
+  drupal_add_js
+    ('(function ($) {
+          Drupal.behaviors.ANAIchpvaletAdd=function(context){
+      	    $("#edit-ajax-CheckoutTime:not(.CheckoutTime-processed)",context)
+              .addClass("CheckoutTime-processed")
+              .AnyTime_picker({format:"%Y-%m-%d %H:%i:%s",hideInput:true,
+                              labelTitle:"Checkout Date and Time",
+                              placement:"inline",askSecond:false});
+          };
+       }(jQuery));', 'inline');
+
+  // Layout person
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['subtag'] = 'person';
+  $settings['subframe'] = TRUE;
+  $settings['subframetitle'] = t('Person');
+  $settings['option']['skipnotrequired'] = TRUE;
+  $settings['option']['skipdepartment'] = TRUE;
+  $settings['option']['skiprole'] = TRUE;
+  $settings['option']['skiptitle'] = TRUE;
+  $settings['option']['skipemail'] = TRUE;
+  $settings['option']['skipemailnotification'] = TRUE;
+  $settings['option']['skiplogin'] = TRUE;
+  chpprop_produce_person($form, $form_state, $settings);
+
+  // Layout vehicle
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['subtag'] = 'vehicle';
+  $settings['subframe'] = TRUE;
+  $settings['subframetitle'] = t('Vehicle');
+  if (chpprop_produce_vehicle(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+
+  /* $form['FirstName'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('First name'), */
+  /* 	  '#maxlength' => 40, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* $form['LastName'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('Last name'), */
+  /* 	  '#maxlength' => 40, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* $form['Phone'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('Phone'), */
+  /* 	  '#maxlength' => 20, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* $form['Street'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('Street'), */
+  /* 	  '#maxlength' => 80, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* $form['City'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('City'), */
+  /* 	  '#maxlength' => 40, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* $form['PostalCode'] = */
+  /*   array('#type' => 'textfield', */
+  /* 	  '#title' => t('Postal code'), */
+  /* 	  '#maxlength' => 10, */
+  /* 	  '#description' => '(Optional)'); */
+
+  /* // Layout location */
+  /* $settings = array(); */
+  /* $settings['tag'] = 'location'; */
+  /* if (chpprop_produce_location(&$form, &$form_state, $settings)) { */
+  /*   return $form; */
+  /* } */
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpvalet_add_form_validate_continue'),
+	  '#submit' => array('chpvalet_add_form_submit_continue'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpvalet_add_form_submit_cancel'));
+    return $form;
+}
+
+function chpvalet_add_continue_form($form_state) {
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  // Start new wrapper for damages
+  $form['damage'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Damages'),
+	  '#prefix' => '<div id="damage-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  $form['damage']['adddamagebtn'] =
+    array('#type' => 'button',
+	  '#value' => t('Add damage'),
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('damage')),
+			   'wrapper' => 'damage-wrapper'));
+
+  // List of included damages
+  if (!isset($form_state['storage']['damage']['DamageList'])) {
+    $form_state['storage']['damage']['DamageList'] = array();
+    $damages = $form_state['storage']['damage']['DamageList'];
+  } else {
+    $damages = unserialize($form_state['storage']['damage']['DamageList']);
+  }
+
+  // Place holder for button on top row
+  if (count($damages) > 0) {
+    $form['damage']['cleardamagebtn'] = array('#type' => 'hidden');
+  }
+
+  // Add damage form elements only when button is used
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') !== FALSE) {
+    unset($form['damage']['adddamagebtn']);
+    $options = array();
+    $options['Front'] = t('Front');
+    $options['Rear'] = t('Rear');
+    $options['Left side'] = t('Left side');
+    $options['Right side'] = t('Right side');
+    $options['Windshield'] = t('Windshield');
+    $options['Rear window'] = t('Rear window');
+    if (!isset($form_state['storage']['damage']['Place'])) {
+      $form_state['storage']['damage']['Place'] = key($options);
+    }
+    $form['damage']['Place'] =
+      array('#type' => 'select',
+	    '#title' => t('Place on vehicle'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['damage']['Place']);
+
+    $options = array();
+    $options['Scratch'] = t('Scratch');
+    $options['Bump'] = t('Bump');
+    $options['Other'] = t('Other');
+    if (!isset($form_state['storage']['damage']['Damage'])) {
+      $form_state['storage']['damage']['Damage'] = key($options);
+    }
+    $form['damage']['Damage'] =
+      array('#type' => 'select',
+	    '#title' => t('Damage'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['damage']['Damage']);
+    if (!isset($form_state['storage']['damage']['DamageOther'])) {
+      $form_state['storage']['damage']['DamageOther'] = '';
+    }
+    $form['damage']['DamageOther'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Damage other'),
+	    '#maxlength' => 80,
+	    '#default_value' => $form_state['storage']['damage']['DamageOther']);
+
+    $form['damage']['savedamagebtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Include'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('damage')),
+			     'wrapper' => 'damage-wrapper'));
+  }
+
+  // Whenever clear list button is used then clear list and remove the button
+  // (no point having a clear button when list is empty)
+  if (strpos($form_state['clicked_button']['#id'], 'cleardamagebtn') !== FALSE) {
+    $damages = array();
+    unset($form['damage']['cleardamagebtn']);
+  }
+
+  // Include damage in list when button is pressed
+  if (strpos($form_state['clicked_button']['#id'], 'savedamagebtn') !== FALSE) {
+
+    $damages[] =
+      array('Place' => $form_state['storage']['damage']['Place'],
+	    'Damage' =>
+	    ($form_state['storage']['damage']['Damage'] !== 'Other') ?
+	    $form_state['storage']['damage']['Damage'] :
+	    $form_state['storage']['damage']['DamageOther']);
+    unset($form_state['storage']['damage']['Place']);
+    unset($form_state['storage']['damage']['Damage']);
+    unset($form_state['storage']['damage']['DamageOther']);
+  }
+
+  // Replace the placeholder on top row with button as long as not in add-mode
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') === FALSE and
+      count($damages) > 0) {
+    $form['damage']['cleardamagebtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Clear table'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('damage')),
+			     'wrapper' => 'damage-wrapper'));
+  }
+
+  // Show the damage list as long as not in add-mode
+  if (strpos($form_state['clicked_button']['#id'], 'adddamagebtn') === FALSE) {
+    if (count($damages) > 0) {
+      $header = array(t('Place'), t('Damage'));
+      $rows = array();
+      foreach ($damages as $damage) {
+    	$rows[] = array($damage['Place'], $damage['Damage']);
+      }
+      $form['damage']['ViewList'] = array('#value' => theme_table($header, $rows));
+    }
+  } else { // Remove placeholder when in add-mode
+    unset($form['damage']['cleardamagebtn']);
+  }
+
+  // Save damage list in hidden element to survive reloads
+  $form['damage']['DamageList'] =
+    array('#type' => 'hidden',
+	  '#value' => serialize($damages));
+
+  $lpn = $form_state['storage']['vehicle']['LPN'];
+  $services = array();
+
+  // Retrieve dedicated services for the property
+  foreach (chdbvalet_get_vases($company_id,
+			       FALSE, // Template
+			       $property_id) as $vas) {
+    $services[$vas['Offer']][$vas['Choice']] = $vas['Amount'];
+  }
+  // Add up any template
+  foreach (chdbvalet_get_vases($company_id,
+			       TRUE, // Template
+			       FALSE) as $vas) {
+    $services[$vas['Offer']][$vas['Choice']] = $vas['Amount'];
+  }
+
+  // Start new wrapper for services
+  if (sizeof($services) > 0) {
+    $form['service'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Services'),
+	    '#prefix' => '<div id="service-wrapper">',
+	    '#suffix' => '</div>',
+	    '#tree' => TRUE);
+
+    foreach ($services as $offer => $choices) {
+      $options = array();
+      $options['None___0.00'] = t('None');
+      foreach ($choices as $choice => $amount) {
+	$options[$choice.'___'.$amount] = $choice.' ['.$amount.']';
+      }
+      if (!isset($form_state['storage']['service']['Offer'][$offer])) {
+	$form_state['storage']['service']['Offer'][$offer] = key($options);
+      }
+      $form['service']['Offer'][$offer] =
+	array('#type' => 'radios',
+	      '#title' => $offer,
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['service']['Offer'][$offer]);
+    }
+  }
+
+  $form['save'] =
+    array('#type' => 'submit',
+	  '#value' => t('Save'),
+	  '#validate' => array('chpvalet_add_form_validate_save'),
+	  '#submit' => array('chpvalet_add_form_submit_save'));
+
+  $form['cancel'] =
+    array('#type' => 'submit',
+	  '#value' => t('Cancel'),
+	  '#submit' => array('chpvalet_add_form_submit_cancel'));
+  
+  return $form;
+}
+
+function chpvalet_add_form_validate_continue($form, &$form_state) {
+  if (isset($form_state['storage']['ajax']['Code'])) {
+    if (empty($form_state['storage']['ajax']['Amount'])) {
+      form_set_error('ajax][Amount', t('Amount field is required.'));
+      return;
+    }
+    if (!preg_match('/\d+\.\d{2}/', $form_state['storage']['ajax']['Amount'])) {
+      form_set_error('ajax][Amount', 'Amount must be given in format X.XX');
+      return;
+    }
+  }
+  if (empty($form_state['values']['ajax']['vehicle']['LPN'])) {
+    form_set_error('ajax][vehicle][LPN', t('LPN field is required.'));
+    return;
+  }
+  if (empty($form_state['values']['ajax']['vehicle']['Model'])) {
+    form_set_error('ajax][vehicle][Model', t('Model field is required.'));
+    return;
+  }
+  if (empty($form_state['values']['ajax']['vehicle']['Color'])) {
+    form_set_error('ajax][vehicle][Color', t('Color field is required.'));
+    return;
+  }
+
+  // Store values into stage 2 form
+  $form_state['storage']['ajax']['CheckoutTime'] = $form_state['values']['ajax']['CheckoutTime'];
+  $form_state['storage']['ajax']['person']['FirstName'] = $form_state['values']['ajax']['person']['FirstName'];
+  $form_state['storage']['ajax']['person']['LastName'] = $form_state['values']['ajax']['person']['LastName'];
+  $form_state['storage']['ajax']['person']['Phone'] = $form_state['values']['ajax']['person']['Phone'];
+  $form_state['storage']['ajax']['person']['Street'] = $form_state['values']['ajax']['person']['Street'];
+  $form_state['storage']['ajax']['person']['City'] = $form_state['values']['ajax']['person']['City'];
+  $form_state['storage']['ajax']['person']['PostalCode'] = $form_state['values']['ajax']['person']['PostalCode'];
+  $form_state['storage']['ajax']['person']['Province'] = $form_state['values']['ajax']['person']['Province'];
+  $form_state['storage']['ajax']['person']['Country'] = $form_state['values']['ajax']['person']['Country'];
+  $form_state['storage']['ajax']['vehicle']['LPN'] = $form_state['values']['ajax']['vehicle']['LPN'];
+  $form_state['storage']['ajax']['vehicle']['Make'] = $form_state['values']['ajax']['vehicle']['Make'];
+  $form_state['storage']['ajax']['vehicle']['Model'] = $form_state['values']['ajax']['vehicle']['Model'];
+  $form_state['storage']['ajax']['vehicle']['Color'] = $form_state['values']['ajax']['vehicle']['Color'];
+
+  // Set flag to trigger stage 2 form
+  $form_state['storage']['continue'] = TRUE;
+}
+
+function chpvalet_add_form_submit_continue($form, &$form_state) {
+  $form_state['storage']['continue'] = TRUE;
+}
+
+function chpvalet_add_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletlist';
+}
+
+function chpvalet_add_form_validate_save($form, &$form_state) {
+}
+
+function chpvalet_add_form_submit_save($form, &$form_state) {
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  //$patroller_id = $form_state['storage']['ajax']['PatrollerId'];
+
+  $lpn = $form_state['storage']['ajax']['vehicle']['LPN'];
+  $make = $form_state['storage']['ajax']['vehicle']['Make'];
+  $model = $form_state['storage']['ajax']['vehicle']['Model'];
+  $color = $form_state['storage']['ajax']['vehicle']['Color'];
+
+  $code = $form_state['storage']['ajax']['Code'];
+  $description = $form_state['storage']['ajax']['Description'];
+  $amount = $form_state['storage']['ajax']['Amount'];
+
+  $reference = chpvalet_genRandomReference();
+
+  $status = 'CheckIn';
+  $checkout = chpuser_datetime_usertimezone_to_utc
+    ($form_state['storage']['ajax']['CheckoutTime']);
+  $checkout_time = $checkout->format("Y-m-d H:i:s");
+  $checkin = chpuser_datetime_utc_to_utc('now');
+
+  if (chdbvalet_insert_receipt
+      ($company_id, $property_id, $lot_id,
+       $lpn, $make, $model, $color,
+       $code, $description, $amount,
+       $reference, $status, $checkout_time,
+       $id)) {
+    drupal_set_message('Could not insert valet', 'error');
+    return;
+  }
+
+  $first_name = $form_state['storage']['ajax']['person']['FirstName'];
+  $last_name = $form_state['storage']['ajax']['person']['LastName'];
+  $phone = $form_state['storage']['ajax']['person']['Phone'];
+  $street = $form_state['storage']['ajax']['person']['Street'];
+  $city = $form_state['storage']['ajax']['person']['City'];
+  $postal_code = $form_state['storage']['ajax']['person']['PostalCode'];
+  $province = $form_state['storage']['ajax']['person']['Province'];
+  $country = chpprop_retrieve_country($form_state['storage']['ajax']['person']['Country']);
+
+  if (chdbvalet_update_receipt_person
+      ($id,
+       $first_name, $last_name, $phone,
+       $street, $city, $postal_code,
+       $province, $country)) {
+    drupal_set_message('Could not update valet person', 'error');
+    return;
+  }
+
+  if (chdbvalet_delete_damages
+      ($company_id, $lpn)) {
+    drupal_set_message('Could not purge old damages', 'error');
+    return;
+  }
+
+  $damages = unserialize($form_state['values']['damage']['DamageList']);
+
+  foreach ($damages as $value) {
+    $place = $value['Place'];
+    $damage = $value['Damage'];
+    if (chdbvalet_insert_damage
+	($company_id, $property_id, $lot_id,
+	 $lpn, $reference, $place, $damage,
+	 $id)) {
+      drupal_set_message('Could not insert damage', 'error');
+      return;
+    }
+  }
+
+  if (chdbvalet_delete_valetvases
+      ($company_id, $lpn)) {
+    drupal_set_message('Could not purge old services', 'error');
+    return;
+  }
+
+  $services = array();
+  if (isset($form_state['values']['service']['Offer'])) {
+    $services = $form_state['values']['service']['Offer'];
+  }
+
+  foreach ($services as $offer => $value) {
+    $choice = substr($value, 0, strpos($value, '___'));
+    if ($choice === 'None') {
+      continue;
+    }
+    $amount = substr($value, strlen($choice) + 3);
+    if (chdbvalet_insert_valetvas
+	($company_id, $property_id, $lot_id,
+	 $lpn, $reference,
+	 $offer, $choice, $amount,
+	 $id)) {
+      drupal_set_message('Could not insert services', 'error');
+      return;
+    }
+  }
+
+  $freq_user = chdbprop_get_freq_user($lpn);
+  if (sizeof($freq_user) == 0) {
+    if (chdbprop_insert_freq_user
+	($property_id,
+	 $lpn, $make, $model, $color)) {
+      drupal_set_message('Could not insert freq user', 'error');
+      return;
+    }
+  } else {
+    if (chdbprop_update_freq_user
+	($property_id,
+	 $lpn, $make, $model, $color)) {
+      drupal_set_message('Could not update freq user', 'error');
+      return;
+    }
+  }
+
+  if (chdbprop_update_freq_user_person
+      ($lpn,
+       $first_name, $last_name, $phone,
+       $street, $city, $postal_code,
+       $province, $country)) {
+    drupal_set_message('Could not update freq user person', 'error');
+    return;
+  }
+
+  $interval = $checkout->diff($checkin);
+  $days = $interval->d;
+  $days += $interval->h ? 1 : 0;
+
+  if (chdbvalet_stats_new
+      ($company_id, $property_id, $lot_id,
+       $code, $days, $lpn)) {
+    drupal_set_message('Could not insert valet stats', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpvaletlist';
+}
+
+function chpvalet_add_form_submit($form, &$form_state) {
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+}
+
+
+
+
+
+

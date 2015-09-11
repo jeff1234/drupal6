@@ -1,0 +1,238 @@
+<?php
+// $Id$
+require_once("anai_chpadmin_db.inc");
+
+
+
+function chpadmin_app_name($tag) {
+  switch ($tag) {
+  case 'Enforcement':
+    return t('Mobile Enforcement device');
+  case 'Valet':
+    return t('Mobile Valet device');
+  case 'Securepark':
+    return t('Securepark LPR computer');
+  case 'Videopark':
+    return t('Videopark LPR controller');
+  }
+  return 'Unknown';
+}
+
+
+
+function chpadmin_investigate_status() {
+  $status = array();
+
+  $server = chdbadmin_get_server();
+  $status[] = array('item' => t('Mobile units server'),
+		    'system' => t('System'),
+		    'status' => !empty($server) ? 'OK' : 'ERROR');
+
+  $num = count(chdbadmin_get_all_vehicles());
+  $status[] = array('item' => t('Vehicle makes'),
+		    'system' => t('System'),
+		    'status' => ($num > 0) ? 'OK' : 'ERROR',
+		    'comment' => t('Found: NUM', array('NUM' => $num)));
+
+  $num = count(chdbprop_get_all_apps());
+  $status[] = array('item' => t('Mobile units Apps'),
+		    'system' => t('System'),
+		    'status' => ($num > 0) ? 'OK' : 'WARNING',
+		    'comment' => t('Found: NUM', array('NUM' => $num)));
+
+  // OK when at least one property exists
+  $properties = chdbprop_get_all_properties();
+  $num = count($properties);
+  $status[] = array('item' => t('Properties'),
+		    'system' => t('System'),
+		    'status' => ($num > 0) ? 'OK' : 'ERROR',
+		    'comment' => t('Found: NUM', array('NUM' => $num)));
+
+  // Prepare properties with error conditions
+  $validations = array();
+  foreach ($properties as $property) {
+    $validations[$property['PropertyId']] =
+      array('Alias' =>
+	    decode_entities($property['Alias']).', '.
+	    decode_entities($property['Street']).', '.
+	    decode_entities($property['City']),
+	    'Relation' => FALSE,
+	    'RelationNote' => t('Missing company relation'),
+	    );
+  }
+
+  // OK when at least one relation exists
+  $relations = chdbprop_get_all_relations();
+  $n = 0;
+  foreach ($relations as $relation) {
+    if (isset($validations[$relation['PropertyId']])) {
+      $n++;
+      $validations[$relation['PropertyId']]['Relation'] = TRUE;
+      $validations[$relation['PropertyId']]['RelationNote'] = t('Relations: NUM', array('NUM' => $n));
+    } else {
+      // Relations table has an entry for a non-existing property
+      $validations[$relation['PropertyId']] =
+	array('Alias' => $relation['PropertyId'],
+	      'Relation' => FALSE,
+	      'RelationNote' => t('Deleted property part of relation'));
+    }
+  }
+
+  foreach ($validations as $property_id => $validate) {
+    if (!$validate['Relation']) {
+      continue;
+    }
+    foreach ($relations as $relation) {
+      if ($property_id !== $relation['PropertyId']) {
+	continue;
+      }
+      foreach (chdbprop_get_policies($property_id) as $policy) {
+	$profile = chdbprop_get_profile($policy['ProfileId']);
+	if ($profile['EnforcementPolicy']) {
+	  $n = count(chdbpatrol_get_patrollers($relation['CompanyId']));
+	  if ($n > 0) {
+	    $validations[$relation['PropertyId']]['Patrollers'] = TRUE;
+	    $validations[$relation['PropertyId']]['PatrollersNote'] = PATROLLER_NAME.'s:'.t(' NUM', array('NUM' => $n));
+	  } else {
+	    $validations[$relation['PropertyId']]['Patrollers'] = FALSE;
+	    $validations[$relation['PropertyId']]['PatrollersNote'] = t('Missing ').PATROLLER_NAME;
+	  }
+	  if ($profile['Ticketing']) {
+	    $n = count(chdbtick_get_violations($relation['CompanyId'], FALSE, $property_id));
+	    if ($n == 0) {
+	      $n = count(chdbtick_get_violations($relation['CompanyId'], TRUE, NULL));
+	    }
+	    if ($n > 0) {
+	      $validations[$relation['PropertyId']]['Violations'] = TRUE;
+	      $validations[$relation['PropertyId']]['ViolationsNote'] = t('Violation codes: NUM', array('NUM' => $n));
+	    } else {
+	      $validations[$relation['PropertyId']]['Violations'] = FALSE;
+	      $validations[$relation['PropertyId']]['ViolationsNote'] = t('Missing violation codes');
+	    }
+	    $n = count(chdbtick_get_printer_config($relation['CompanyId'], FALSE, $property_id));
+	    if ($n == 0) {
+	      $n = count(chdbtick_get_printer_config($relation['CompanyId'], TRUE, NULL));
+	    }
+	    if ($n > 0) {
+	      $validations[$relation['PropertyId']]['Printer'] = TRUE;
+	      $validations[$relation['PropertyId']]['PrinterNote'] = t('Printer layout found');
+	    } else {
+	      $validations[$relation['PropertyId']]['Printer'] = FALSE;
+	      $validations[$relation['PropertyId']]['PrinterNote'] = t('Missing printer layout');
+	    }
+	  }
+	  break;
+	}
+      }
+    }
+  }
+
+  foreach ($validations as $validate) {
+    $status[] = array('item' => $validate['Alias'],
+		      'system' => t('Property'),
+		      'status' => $validate['Relation'] ? 'OK' : 'ERROR',
+		      'comment' => $validate['RelationNote']);
+    if (isset($validate['Patrollers'])) {
+      $status[] = array('item' => $validate['Alias'],
+			'system' => t('Property'),
+			'status' => $validate['Patrollers'] ? 'OK' : 'ERROR',
+			'comment' => $validate['PatrollersNote']);
+    }
+    if (isset($validate['Violations'])) {
+      $status[] = array('item' => $validate['Alias'],
+			'system' => t('Property'),
+			'status' => $validate['Violations'] ? 'OK' : 'WARNING',
+			'comment' => $validate['ViolationsNote']);
+    }
+    if (isset($validate['Printer'])) {
+      $status[] = array('item' => $validate['Alias'],
+			'system' => t('Property'),
+			'status' => $validate['Printer'] ? 'OK' : 'WARNING',
+			'comment' => $validate['PrinterNote']);
+    }
+  }
+
+  // OK when at least one company exists
+  $companies = chdbprop_get_all_companies();
+  $num = count($companies);
+  $status[] = array('item' => t('Companies'),
+		    'system' => t('System'),
+		    'status' => ($num > 0) ? 'OK' : 'ERROR',
+		    'comment' => t('Found: NUM', array('NUM' => $num)));
+
+  // Prepare companies with error conditions
+  $validations = array();
+  foreach ($companies as $company) {
+    $validations[$company['CompanyId']] =
+      array('Alias' =>
+	    decode_entities($company['Alias']).', '.
+	    decode_entities($company['Street']).', '.
+	    decode_entities($company['City']),
+	    'Relation' => FALSE,
+	    'RelationNote' => t('Missing property relation'));
+  }
+
+  // OK when at least one relation exists
+  $n = 0;
+  foreach ($relations as $relation) {
+    if (isset($validations[$relation['CompanyId']])) {
+      $n++;
+      $validations[$relation['CompanyId']]['Relation'] = TRUE;
+      $validations[$relation['CompanyId']]['RelationNote'] = t('Relations: NUM', array('NUM' => $n));
+    } else {
+      // Relations table has an entry for a non-existing company
+      $validations[$relation['CompanyId']] =
+	array('Alias' => $relation['CompanyId'],
+	      'Relation' => TRUE,
+	      'RelationNote' => t('Deleted company part of relation'));
+    }
+  }
+
+  foreach ($validations as $company_id => $validate) {
+    if (!$validate['Relation']) {
+      continue;
+    }
+    foreach ($relations as $relation) {
+      if ($company_id !== $relation['CompanyId']) {
+	continue;
+      }
+      foreach (chdbprop_get_policies($relation['PropertyId']) as $policy) {
+	$profile = chdbprop_get_profile($policy['ProfileId']);
+	if ($profile['EnforcementPolicy']) {
+	  $n = 0;
+	  foreach (chdbprop_get_company_users($company_id) as $dbuser) {
+	    $account = user_load(array('uid' => $dbuser['UID']));
+	    if (in_array('Enforcer', array_values($account->roles)) and $account->status) {
+	      $n++;
+	    }
+	  }
+	  if ($n > 0) {
+	    $validations[$relation['CompanyId']]['Enforcement'] = TRUE;
+	    $validations[$relation['CompanyId']]['EnforcementNote'] = t('Enforcers: NUM', array('NUM' => $n));
+	  } else {
+	    $validations[$relation['CompanyId']]['Enforcement'] = FALSE;
+	    $validations[$relation['CompanyId']]['EnforcementNote'] = t('Missing enforcers');
+	  }
+	}
+      }
+    }
+  }
+
+  foreach ($validations as $validate) {
+    $status[] = array('item' => $validate['Alias'],
+		      'system' => t('Company'),
+		      'status' => $validate['Relation'] ? 'OK' : 'WARNING',
+		      'comment' => $validate['RelationNote']);
+    if (isset($validate['Enforcement'])) {
+      $status[] = array('item' => $validate['Alias'],
+			'system' => t('Company'),
+			'status' => $validate['Enforcement'] ? 'OK' : 'WARNING',
+			'comment' => $validate['EnforcementNote']);
+    }
+  }
+
+  return $status;
+}
+
+
+

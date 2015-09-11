@@ -1,0 +1,508 @@
+<?php
+// $Id$
+require_once("anai_chpanalytics.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * Analytics module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ *
+ */
+function anai_chpanalytics_perm() {
+  return array('anai chp view analytics');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_menu().
+ *
+ */
+function anai_chpanalytics_menu() {
+  $items = array();
+  $items['chpanusage'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpan_usage_form'),
+     'access arguments' => array('anai chp view analytics'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Usage
+ ********** Address: chpanusage
+ ********** Access:  'anai chp view analytics'
+ *********/
+
+
+
+function chpan_usage_form($form_state) {
+  drupal_set_title(t('Analytics'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['validate'] = 'chpan_usage_form_validate_back';
+  $settings['buttons']['back']['submit'] = 'chpan_usage_form_submit';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $policies = $form_state['storage']['ajax']['Lots'][$property_id];
+  $policy = $policies[$lot_id]['data'];
+  $profile = array();
+  $enforcement = array();
+  $equipment = array();
+
+  $profile_id = $policy['ProfileId'];
+  $enforcement_id = $policy['EnforcementId'];
+  $equipment_id = $policy['EquipmentId'];
+
+  $profile = chdbprop_get_profile($profile_id);
+  if (!empty($enforcement_id)) {
+    $enforcement = chdbprop_get_enforcement($enforcement_id);
+  }
+  if (!empty($equipment_id)) {
+    $equipment = chdbprop_get_equipment($equipment_id);
+  }
+
+  $account = user_load(array('uid' => $user->uid));
+  $options = array();
+
+  // Include Permit analytics if applicable
+  if ($profile['LongPolicy'] or $profile['ShortPolicy'] or $profile['LongShortPolicy']) {
+    $options['Permits'] = t('Permits');
+    chpan_prepare_permit_predictions($company_id, $property_id, $policies);
+    $permit_data = chpan_permit_graph_predictions($company_id, $property_id, $policies);
+  }
+
+  // Include Lane analytics if applicable
+  if (!empty($equipment) and $equipment['LPR']) {
+    $options['Lanes'] = t('Lanes');
+    chpan_prepare_lanecount_predictions($company_id, $property_id, $policies);
+
+    $lanes = array();
+    if ((in_array('Admin', array_values($account->roles)) and $account->status) or
+	$account->uid == 1) {
+      foreach (chdbprop_cc_get_lanes_admin($company_id, $property_id,
+					   'ANY', 'ANY', 'ANY') as $lane) {
+	$lanes[$lane['LaneId']] = $lane['LaneId'];
+      } //anai_dbg($lanes);
+    } else {
+      foreach (chdbprop_cc_get_lanes($company_id, $property_id,
+				     'ANY', 'ANY', 'ANY') as $lane) {
+	$lanes[$lane['LaneId']] = $lane['LaneId'];
+      } //anai_dbg($lanes);
+    }
+
+    $lane_data =
+      chpan_lanecount_graph_predictions
+      ($company_id, $property_id, $policies,
+       array_keys($policies),
+       array_keys($lanes));
+  }
+
+  // Include Ticket and Booting analytics if applicable
+  if ($profile['EnforcementPolicy']) {
+    if ($profile['Ticketing']) {
+      $options['Tickets'] = t('Tickets');
+      chpan_prepare_ticket_predictions($company_id, $property_id, $policies);
+      $ticket_data = chpan_ticket_graph_predictions($company_id, $property_id, $policies);
+    }
+    if ($profile['Booting']) {
+      $options['Boots'] = t('Boots');
+      chpan_prepare_boot_predictions($company_id, $property_id, $policies);
+      $boot_data = chpan_boot_graph_predictions($company_id, $property_id, $policies);
+    }
+  }
+
+  // Include Valet analytics if applicable
+  if ($profile['ValetPolicy']) {
+    $options['Valets'] = t('Valets');
+    chpan_prepare_valet_predictions($company_id, $property_id, $policies);
+    $valet_data = chpan_valet_graph_predictions($company_id, $property_id, $policies);
+  }
+
+  if ($form_state['storage']['ajax']['CompanyChanged'] or
+      $form_state['storage']['ajax']['PropertyChanged'] or
+      $form_state['storage']['ajax']['LotChanged']) {
+    unset($form_state['storage']['ajax']['Category']);
+  }
+  if (!isset($form_state['storage']['ajax']['Category'])) {
+    $form_state['storage']['ajax']['Category'] = key($options);
+  }
+  if (count($options) > 1) {
+    $form['ajax']['Category'] =
+      array('#type' => 'select',
+	    '#options' => $options,
+	    '#title' => t('Category'),
+	    '#default_value' => $form_state['storage']['ajax']['Category'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  $options = array();
+  $options['Daily'] = t('Last 14 days');
+  $options['Weekly'] = t('Last 16 weeks');
+  $options['Monthly'] = t('Last 12 months');
+
+  if ($form_state['storage']['ajax']['CompanyChanged'] or
+      $form_state['storage']['ajax']['PropertyChanged'] or
+      $form_state['storage']['ajax']['LotChanged']) {
+    unset($form_state['storage']['ajax']['View']);
+  }
+  if (!isset($form_state['storage']['ajax']['View'])) {
+    $form_state['storage']['ajax']['View'] = key($options);
+  }
+  $form['ajax']['View'] =
+    array('#type' => 'select',
+	  '#options' => $options,
+	  '#title' => t('View'),
+	  '#default_value' => $form_state['storage']['ajax']['View'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  /***
+   * Present the data
+   */
+  $debug = FALSE;
+
+  // Permit
+  if ($form_state['storage']['ajax']['Category'] === 'Permits') {
+    $tmp = '<table border="7">';
+    $tmp .= '<tr>';
+    $tmp .= '<td colspan="4"><center><h2>';
+    if ($lot_id === 'Aggregate') {
+      $tmp .= t('Predictions at property');
+    } else {
+      $tmp .= t('Predictions at LOT', array('LOT' => $permit_data[$lot_id]['alias']));
+      if ($debug) {
+	$tmp .= ' '.$lot_id;
+      }
+    }
+    $tmp .= '</h2></center>';
+    $tmp .= '</tr>';
+    $tmp .= '<tr>';
+    $tmp .= '<td><center><h3>'.t('Today').'</h3><b>';
+    $tmp .= $permit_data[$lot_id]['current_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Tomorrow').'</h3><b>';
+    $tmp .= $permit_data[$lot_id]['next_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next week').'</h3><b>';
+    $tmp .= $permit_data[$lot_id]['next_week'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next month').'</h3><b>';
+    $tmp .= $permit_data[$lot_id]['next_month'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '</tr>';
+    $tmp .= '</table>';
+
+    $form['ajax']['Predictions'] = array('#value' => $tmp, '#suffix' => '<p><p>');
+
+    if ($form_state['storage']['ajax']['View'] === 'Daily') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$permit_data[$lot_id]['image_daily'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Weekly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$permit_data[$lot_id]['image_weekly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Monthly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$permit_data[$lot_id]['image_monthly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+  }
+
+  // Lane
+  if ($form_state['storage']['ajax']['Category'] === 'Lanes') {
+    $tmp = '<table border="7">';
+    $tmp .= '<tr>';
+    $tmp .= '<td colspan="4"><center><h2>';
+    if ($lot_id === 'Aggregate') {
+      $tmp .= t('Predictions at property');
+    } else {
+      $tmp .= t('Predictions at LOT', array('LOT' => $lane_data[$lot_id]['alias']));
+      if ($debug) {
+	$tmp .= ' '.$lot_id;
+      }
+    }
+    $tmp .= '</h2></center>';
+    $tmp .= '</tr>';
+    $tmp .= '<tr>';
+    $tmp .= '<td><center><h3>'.t('Today').'</h3><b>';
+    $tmp .= $lane_data[$lot_id]['current_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Tomorrow').'</h3><b>';
+    $tmp .= $lane_data[$lot_id]['next_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next week').'</h3><b>';
+    $tmp .= $lane_data[$lot_id]['next_week'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next month').'</h3><b>';
+    $tmp .= $lane_data[$lot_id]['next_month'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '</tr>';
+    $tmp .= '</table>';
+
+    $form['ajax']['Predictions'] = array('#value' => $tmp, '#suffix' => '<p><p>');
+
+    if ($form_state['storage']['ajax']['View'] === 'Daily') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$lane_data[$lot_id]['image_daily'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Weekly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$lane_data[$lot_id]['image_weekly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Monthly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$lane_data[$lot_id]['image_monthly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+  }
+
+  // Ticket
+  if ($form_state['storage']['ajax']['Category'] === 'Tickets') {
+    $tmp = '<table border="7">';
+    $tmp .= '<tr>';
+    $tmp .= '<td colspan="4"><center><h2>';
+    if ($lot_id === 'Aggregate') {
+      $tmp .= t('Predictions at property');
+    } else {
+      $tmp .= t('Predictions at LOT', array('LOT' => $ticket_data[$lot_id]['alias']));
+      if ($debug) {
+	$tmp .= ' '.$lot_id;
+      }
+    }
+    $tmp .= '</h2></center>';
+    $tmp .= '</tr>';
+    $tmp .= '<tr>';
+    $tmp .= '<td><center><h3>'.t('Today').'</h3><b>';
+    $tmp .= $ticket_data[$lot_id]['current_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Tomorrow').'</h3><b>';
+    $tmp .= $ticket_data[$lot_id]['next_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next week').'</h3><b>';
+    $tmp .= $ticket_data[$lot_id]['next_week'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next month').'</h3><b>';
+    $tmp .= $ticket_data[$lot_id]['next_month'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '</tr>';
+    $tmp .= '</table>';
+
+    $form['ajax']['Predictions'] = array('#value' => $tmp, '#suffix' => '<p><p>');
+
+    if ($form_state['storage']['ajax']['View'] === 'Daily') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$ticket_data[$lot_id]['image_daily'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Weekly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$ticket_data[$lot_id]['image_weekly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Monthly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$ticket_data[$lot_id]['image_monthly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+  }
+
+  if ($form_state['storage']['ajax']['Category'] === 'Boots') {
+    $tmp = '<table border="7">';
+    $tmp .= '<tr>';
+    $tmp .= '<td colspan="4"><center><h2>';
+    if ($lot_id === 'Aggregate') {
+      $tmp .= t('Predictions at property');
+    } else {
+      $tmp .= t('Predictions at LOT', array('LOT' => $boot_data[$lot_id]['alias']));
+      if ($debug) {
+	$tmp .= ' '.$lot_id;
+      }
+    }
+    $tmp .= '</h2></center>';
+    $tmp .= '</tr>';
+    $tmp .= '<tr>';
+    $tmp .= '<td><center><h3>'.t('Today').'</h3><b>';
+    $tmp .= $boot_data[$lot_id]['current_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Tomorrow').'</h3><b>';
+    $tmp .= $boot_data[$lot_id]['next_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next week').'</h3><b>';
+    $tmp .= $boot_data[$lot_id]['next_week'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next month').'</h3><b>';
+    $tmp .= $boot_data[$lot_id]['next_month'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '</tr>';
+    $tmp .= '</table>';
+
+    $form['ajax']['Predictions'] = array('#value' => $tmp, '#suffix' => '<p><p>');
+
+    if ($form_state['storage']['ajax']['View'] === 'Daily') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$boot_data[$lot_id]['image_daily'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Weekly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$boot_data[$lot_id]['image_weekly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Monthly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$boot_data[$lot_id]['image_monthly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+  }
+
+  if ($form_state['storage']['ajax']['Category'] === 'Valets') {
+    $tmp = '<table border="7">';
+    $tmp .= '<tr>';
+    $tmp .= '<td colspan="4"><center><h2>';
+    if ($lot_id === 'Aggregate') {
+      $tmp .= t('Predictions at property');
+    } else {
+      $tmp .= t('Predictions at LOT', array('LOT' => $valet_data[$lot_id]['alias']));
+      if ($debug) {
+	$tmp .= ' '.$lot_id;
+      }
+    }
+    $tmp .= '</h2></center>';
+    $tmp .= '</tr>';
+    $tmp .= '<tr>';
+    $tmp .= '<td><center><h3>'.t('Today').'</h3><b>';
+    $tmp .= $valet_data[$lot_id]['current_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Tomorrow').'</h3><b>';
+    $tmp .= $valet_data[$lot_id]['next_day'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next week').'</h3><b>';
+    $tmp .= $valet_data[$lot_id]['next_week'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '<td><center><h3>'.t('Next month').'</h3><b>';
+    $tmp .= $valet_data[$lot_id]['next_month'];
+    $tmp .= '</b></center></td>';
+    $tmp .= '</tr>';
+    $tmp .= '</table>';
+
+    $form['ajax']['Predictions'] = array('#value' => $tmp, '#suffix' => '<p><p>');
+
+    if ($form_state['storage']['ajax']['View'] === 'Daily') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$valet_data[$lot_id]['image_daily'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Weekly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$valet_data[$lot_id]['image_weekly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+
+    if ($form_state['storage']['ajax']['View'] === 'Monthly') {
+      $form['ajax']['Graph'] =
+	array('#value' => '<img src="'.$valet_data[$lot_id]['image_monthly'].'">',
+	      '#suffix' => '<p><p>');
+    }
+  }
+
+  return $form;
+}
+
+function chpan_usage_form_validate_back($form, &$form_state) {
+  $form_state['storage']['home'] = TRUE;
+}
+
+function chpan_usage_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpanusage';
+    return;
+  }
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+}
+
+
+

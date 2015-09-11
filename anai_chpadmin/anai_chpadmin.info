@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Admin
+description = Administration
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

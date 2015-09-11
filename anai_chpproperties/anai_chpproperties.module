@@ -1,0 +1,2217 @@
+<?php
+// $Id$
+require_once("anai_chpproperties.inc");
+require_once("anai_chpproperties_company.inc");
+require_once("anai_chpproperties_region.inc");
+require_once("anai_chpproperties_client.inc");
+require_once("anai_chpproperties_enforcer.inc");
+require_once("anai_chpproperties_profile.inc");
+require_once("anai_chpproperties_property.inc");
+
+
+
+/**
+ * @file
+ * ANAI CHP Properties
+ *
+ * Property management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpproperties_perm() {
+  return array(//
+	       'anai chp add property profiles',
+	       'anai chp edit property profiles',
+	       'anai chp list property profiles',
+	       'anai chp delete property profiles',
+	       //
+	       'anai chp add company users',
+	       'anai chp edit company users',
+	       'anai chp list company users',
+	       //
+	       'anai chp add companies',
+	       'anai chp edit companies',
+	       'anai chp list companies',
+	       'anai chp delete companies',
+	       //
+	       'anai chp add regions',
+	       'anai chp edit regions',
+	       'anai chp list regions',
+	       'anai chp delete regions',
+	       //
+	       'anai chp add clients',
+	       'anai chp edit clients',
+	       'anai chp list clients',
+	       'anai chp delete clients',
+	       //
+	       'anai chp add enforcers',
+	       'anai chp edit enforcers',
+	       'anai chp list enforcers',
+	       'anai chp delete enforcers',
+	       //
+	       'anai chp add relations',
+	       'anai chp edit relations',
+	       'anai chp list relations',
+	       'anai chp delete relations',
+	       //
+	       'anai chp add properties',
+	       'anai chp list properties',
+	       'anai chp edit properties',
+	       'anai chp delete properties',
+	       //
+	       'anai chp add property notes',
+	       'anai chp edit property notes',
+	       'anai chp solve property notes',
+	       'anai chp list property notes',
+	       'anai chp delete property notes',
+	       //
+	       'anai chp add property levels',
+	       'anai chp edit property levels',
+	       'anai chp delete property levels',
+	       //
+	       'anai chp view property location map',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpproperties_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpprop_property_profile_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_property_levels_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_property_levels_notes_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_relations_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_users_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_company_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_region_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_client_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_enforcer_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_property_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpprop_property_notes_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpproperties_menu() {
+  $items = array();
+  $items['chppropprofileadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_profile_add_form'),
+     'access arguments' => array('anai chp add property profiles'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropprofiles'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_profile_list_form'),
+     'access arguments' => array('anai chp list property profiles'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpproprel'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_relations_form'),
+     'access arguments' => array('anai chp list relations'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropreladd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_relations_add_form'),
+     'access arguments' => array('anai chp add relations'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropusers'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_users_form'),
+     'access arguments' => array('anai chp list company users'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropenfsadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_enforcer_add_form'),
+     'access arguments' => array('anai chp add enforcers'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropenfs'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_enforcer_form'),
+     'access arguments' => array('anai chp list enforcers'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropcompadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_company_add_form'),
+     'access arguments' => array('anai chp add companies'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropcomp'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_company_form'),
+     'access arguments' => array('anai chp list companies'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropregionadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_region_add_form'),
+     'access arguments' => array('anai chp add regions'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropregion'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_region_form'),
+     'access arguments' => array('anai chp list regions'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropclientadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_client_add_form'),
+     'access arguments' => array('anai chp add clients'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropclient'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_client_form'),
+     'access arguments' => array('anai chp list clients'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_property_add_form'),
+     'access arguments' => array('anai chp add properties'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpproplist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_property_list_form'),
+     'access arguments' => array('anai chp list properties'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropexpand/%'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_property_expand_form', 1),
+     'access arguments' => array('anai chp edit properties'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppropmap'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpprop_property_map_form'),
+     'access arguments' => array('anai chp view property location map'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Property users list
+ ********** Address: chppropusers
+ ********** Access:  'anai chp list company users'
+ *********/
+
+
+
+function chpprop_users_form($form_state) {
+  if (isset($form_state['storage']['add_user'])) {
+    return chpprop_users_add_form($form_state);
+  }
+  if ($form_state['storage']['edit_user']) {
+    return chpprop_users_edit_form($form_state);
+  }
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  drupal_set_title(t('Accounts'));
+
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/back.png',
+  	  '#submit' => array('chpprop_users_form_submit_back'));
+  if (user_access('anai chp add company users')) {
+    $form['add'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/add.png',
+	    '#submit' => array('chpprop_users_form_submit_add'));
+  }
+
+  $companies = chpprop_retrieve_companies($user->uid);
+
+  $options = array();
+  foreach ($companies as $company_id => $company) {
+    $options[$company_id] = decode_entities($company['data']['Alias']);
+  }
+
+  if (empty($options)) {
+    $form['empty'] =
+      array('#value' => '<p>'.t('Empty. No registered companies.'));
+    return $form;
+  }
+
+  ahah_helper_register($form, $form_state);
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  if ($form_state['storage']['ajax']['CompanyId'] === 'ANY') {
+    unset($form_state['storage']['ajax']['CompanyId']);
+  }
+  if (!isset($form_state['storage']['ajax']['CompanyId'])) {
+    if (isset($_SESSION['anai']['TemporaryCompanyId']) and
+	in_array($_SESSION['anai']['TemporaryCompanyId'], array_keys($options))) {
+      $form_state['storage']['ajax']['CompanyId'] = $_SESSION['anai']['TemporaryCompanyId'];
+    } else {
+      $form_state['storage']['ajax']['CompanyId'] = key($options);
+    }
+  }
+  $form['ajax']['CompanyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Company'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['CompanyId'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Note: CompanyId can be 'ANY'
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $users = chpprop_retrieve_users($user->uid, $company_id);
+  //anai_dbg($users, '$users');
+
+  if (empty($users['Manager']) and
+      empty($users['Security']) and
+      empty($users['Enforcer']) and
+      empty($users['Tenant'])) {
+    $form['ajax']['empty'] =
+      array('#value' => '<p>'.t('Empty.'));
+    return $form;
+  }
+
+  $form['ajax']['list'] = chpprop_users_list_table_form($companies[$company_id]['data'], $users);
+  return $form;
+}
+
+function chpprop_users_form_submit_back($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['CompanyId'];
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpproprel';
+}
+
+function chpprop_users_form_submit_add($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['CompanyId'];
+  $form_state['storage']['add_user'] = TRUE;
+}
+
+function chpprop_users_list_table_form($company, $entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpprop_users_table');
+
+  if (user_access('anai chp edit company users')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  $highest = 0;
+  foreach ($entries['Manager'] as $uid => $person) {
+    $form['db']['manager_'.$looper] = array('#value' => $person['Name']);
+
+    if ($readonly) {
+      $form['db']['editmanager_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	      '#name' => 'op_managers'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    } else {
+      $form['db']['editmanager_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_managers'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    }
+    $looper++;
+  }
+
+  if ($looper > $highest) {
+    $highest = $looper;
+  }
+
+  $looper = 0;
+  foreach ($entries['Security'] as $uid => $person) {
+    $form['db']['staff_'.$looper] = array('#value' => $person['Name']);
+
+    if ($readonly) {
+      $form['db']['editstaff_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	      '#name' => 'op_staff'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    } else {
+      $form['db']['editstaff_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_staff'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    }
+    $looper++;
+  }
+
+  if ($looper > $highest) {
+    $highest = $looper;
+  }
+
+  $looper = 0;
+  foreach ($entries['Enforcer'] as $uid => $person) {
+    $form['db']['enforcer_'.$looper] = array('#value' => $person['Name']);
+
+    if ($readonly) {
+      $form['db']['editenforcer_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	      '#name' => 'op_enforcers'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    } else {
+      $form['db']['editenforcer_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_enforcers'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    }
+    $looper++;
+  }
+
+  if ($looper > $highest) {
+    $highest = $looper;
+  }
+
+  $looper = 0;
+  foreach ($entries['Tenant'] as $uid => $person) {
+    $form['db']['tenant_'.$looper] = array('#value' => $person['Name']);
+
+    if ($readonly) {
+      $form['db']['edittenant_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	      '#name' => 'op_tenant'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    } else {
+      $form['db']['edittenant_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_tenant'.$uid,
+	      '#submit' => array('chpprop_users_form_submit'));
+    }
+    $looper++;
+  }
+
+  if ($looper > $highest) {
+    $highest = $looper;
+  }
+
+  // Fixed looper since no other fixed element exists
+  for ($i = 0; $i < $highest; $i++) {
+    $form['db']['idd_'.$i] = array('#value' => $company['Id']);
+  }
+
+  return $form;
+}
+
+function theme_chpprop_users_table($form) {
+  $header = array(array('data' => t('Managers'),
+			'colspan' => 2),
+		  array('data' => t('Security'),
+			'colspan' => 2),
+		  array('data' => t('Enforcers'),
+			'colspan' => 2),
+		  array('data' => t('Tenants'),
+			'colspan' => 2),
+		  );
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (FALSE === strpos($key, 'idd_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('idd_'));
+    $rows[] = array(drupal_render($form['manager_'.$looper]),
+		    array('data' => drupal_render($form['editmanager_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    drupal_render($form['staff_'.$looper]),
+		    array('data' => drupal_render($form['editstaff_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    drupal_render($form['enforcer_'.$looper]),
+		    array('data' => drupal_render($form['editenforcer_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    drupal_render($form['tenant_'.$looper]),
+		    array('data' => drupal_render($form['edittenant_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  return theme_table($header, $rows);
+}
+
+function chpprop_users_add_form($form_state) {
+  global $user;
+  drupal_set_title(t('Add account'));
+
+  ahah_helper_register($form, $form_state);
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  // Build company options
+  $company_options = array();
+  foreach (chpprop_retrieve_companies($user->uid) as $company_id => $company) {
+    $company_options[$company_id] = decode_entities($company['data']['Alias']);
+  }
+  $company_options['ANY'] = t('All companies');
+
+  if (empty($company_options)) {
+    $form['ajax']['empty'] =
+      array('#value' => '<p>'.t('No registered companies, impossible to continue.'));
+    return $form;
+  }
+
+  // Build a master list for all companies
+  $companies = array();
+  foreach (chdbprop_get_all_companies() as $company) {
+    $companies[$company['CompanyId']] = decode_entities($company['Alias']);
+  }
+  $companies['ANY'] = t('All companies');
+
+  // Layout Company options
+  if (isset($form_state['storage']['ajax']['add']['CompanyId']) and
+      !in_array($form_state['storage']['ajax']['add']['CompanyId'], array_keys($company_options))) {
+    unset($form_state['storage']['ajax']['add']['CompanyId']);
+    unset($form_state['storage']['ajax']['add']['user']['RegionId']);
+    unset($form_state['storage']['ajax']['add']['user']['ClientId']);
+    unset($form_state['storage']['ajax']['add']['user']['PropertyId']);
+    unset($form_state['storage']['ajax']['add']['user']['LotId']);
+  }
+  if (!isset($form_state['storage']['ajax']['add']['CompanyId'])) {
+    if (isset($_SESSION['anai']['TemporaryCompanyId']) and
+	in_array($_SESSION['anai']['TemporaryCompanyId'], array_keys($company_options))) {
+      $form_state['storage']['ajax']['add']['CompanyId'] = $_SESSION['anai']['TemporaryCompanyId'];
+    } else {
+      $form_state['storage']['ajax']['add']['CompanyId'] = key($company_options);
+    }
+  }
+  $form['ajax']['add']['CompanyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Company'),
+	  '#options' => $company_options,
+	  '#default_value' => $form_state['storage']['ajax']['add']['CompanyId'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  $company_id = $form_state['storage']['ajax']['add']['CompanyId'];
+
+  // Layout Role options
+  $options = array();
+  $options['Manager'] = t('Manager');
+  $options['Security'] = t('Security');
+  $options['Enforcer'] = t('Enforcer');
+  $options['Tenant'] = t('Tenant');
+  if (!isset($form_state['storage']['ajax']['add']['Role'])) {
+    $form_state['storage']['ajax']['add']['Role'] = key($options);
+  }
+  $form['ajax']['add']['Role'] =
+    array('#type' => 'radios',
+	  '#title' => t('Role'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['add']['Role'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Build a list of existing users under the selected company
+  $existing = array();
+  if ($company_id !== 'ANY') {
+    foreach (chdbprop_get_company_users($company_id) as $dbuser) {
+      $uid = $dbuser['UID'];
+      if (!isset($existing[$uid])) {
+	$account = user_load(array('uid' => $uid));
+	if ((in_array($form_state['storage']['ajax']['add']['Role'], array_values($account->roles)) and
+	     $account->status) or $account->uid == 1) {
+	  $existing[$uid] = TRUE;
+	}
+      }
+    } //anai_dbg($existing, 'Existing');
+  } elseif ($company_id === 'ANY') {
+    foreach ($company_options as $key => $value) {
+      foreach (chdbprop_get_company_users($key) as $dbuser) {
+	$uid = $dbuser['UID'];
+	if (!isset($existing[$uid])) {
+	  $account = user_load(array('uid' => $uid));
+	  if ((in_array($form_state['storage']['ajax']['add']['Role'],
+			array_values($account->roles)) and
+	       $account->status) or $account->uid == 1) {
+	    $existing[$uid] = TRUE;
+	  }
+	}
+      }
+    }
+  }
+
+  $q = db_query("SELECT u.uid,u.name FROM {users} u".
+		" INNER JOIN {users_roles} ur ON u.uid=ur.uid".
+		" INNER JOIN {role} r ON ur.rid=r.rid".
+		" WHERE r.name = '".$form_state['storage']['ajax']['add']['Role']."'".
+		" AND u.status = 1 ORDER BY u.name ASC");
+
+  $accounts = array();
+  while ($r = db_fetch_object($q)) {
+    if ($existing[$r->uid]) {
+      continue;
+    }
+    $accounts[$r->uid] = $r->name;
+  }
+
+  if (empty($accounts)) {
+    $form['ajax']['empty'] =
+      array('#value' => '<p>'.t('No registered users, impossible to continue.'));
+    return $form;
+  }
+
+  // Layout user access box
+  if (!empty($accounts)) {
+    $form['ajax']['add']['user'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('User access'));
+
+    if (!isset($form_state['storage']['ajax']['add']['user']['uids'])) {
+      $form_state['storage']['ajax']['add']['user']['uids'] = array();
+    }
+    $form['ajax']['add']['user']['uids'] =
+      array('#type' => 'checkboxes',
+	    '#title' => t('Available user accounts'),
+	    '#options' => $accounts,
+	    '#default_value' => $form_state['storage']['ajax']['add']['user']['uids']);
+
+    $uids = $form_state['storage']['ajax']['add']['user']['uids'];
+
+    // Build Region options
+    $region_options = array();
+    $regions = chpprop_retrieve_regions($user->uid);
+    if (isset($regions[$company_id])) {
+      foreach ($regions[$company_id] as $region_id => $region) {
+	$region_options[$region_id] = decode_entities($region['data']['Alias']);
+      }
+    }
+    $region_options['ANY'] = t('Any region');
+
+    // Build a master list of all regions
+    $regions = array();
+    foreach (chdbprop_get_all_regions() as $region) {
+      $regions[$region['RegionId']] = decode_entities($region['Alias']);
+    }
+    $regions['ANY'] = t('Any region');
+
+    // Layout regions
+    if (isset($form_state['storage']['ajax']['add']['user']['RegionId']) and
+	!in_array($form_state['storage']['ajax']['add']['user']['RegionId'], array_keys($region_options))) {
+      unset($form_state['storage']['ajax']['add']['user']['RegionId']);
+      unset($form_state['storage']['ajax']['add']['user']['ClientId']);
+      unset($form_state['storage']['ajax']['add']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['add']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['add']['user']['RegionId'])) {
+      $form_state['storage']['ajax']['add']['user']['RegionId'] = key($region_options);
+    }
+    $form['ajax']['add']['user']['RegionId'] =
+      array('#type' => 'select',
+	    '#title' => t('Region'),
+	    '#options' => $region_options,
+	    '#default_value' => $form_state['storage']['ajax']['add']['user']['RegionId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $region_id = $form_state['storage']['ajax']['add']['user']['RegionId'];
+
+    // Build clients
+    $client_options = array();
+    $clients = chpprop_retrieve_clients($user->uid);
+    if (isset($clients[$company_id]) and $region_id !== 'ANY') {
+      foreach ($clients[$company_id][$region_id] as $client_id => $client) {
+	$client_options[$client_id] = decode_entities($client['data']['Alias']);
+      }
+    } elseif (isset($clients[$company_id])) {
+      foreach ($clients[$company_id]as $anyregion => $regionlist) {
+	foreach ($regionlist as $client_id => $client) {
+	  $client_options[$client_id] = decode_entities($client['data']['Alias']);
+	}
+      }
+    }
+    $client_options['ANY'] = t('Any client');
+
+    // Build a master list of all clients
+    $clients = array();
+    $clients['ANY'] = t('Any client');
+    foreach (chdbprop_get_all_clients() as $client) {
+      $clients[$client['ClientId']] = decode_entities($client['Alias']);
+    }
+
+    if (isset($form_state['storage']['ajax']['add']['user']['ClientId']) and
+	!in_array($form_state['storage']['ajax']['add']['user']['ClientId'], array_keys($client_options))) {
+      unset($form_state['storage']['ajax']['add']['user']['ClientId']);
+      unset($form_state['storage']['ajax']['add']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['add']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['add']['user']['ClientId'])) {
+      $form_state['storage']['ajax']['add']['user']['ClientId'] = key($client_options);
+    }
+    $form['ajax']['add']['user']['ClientId'] =
+      array('#type' => 'select',
+	    '#title' => t('Client'),
+	    '#options' => $client_options,
+	    '#default_value' => $form_state['storage']['ajax']['add']['user']['ClientId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $client_id = $form_state['storage']['ajax']['add']['user']['ClientId'];
+
+    $property_options = array();
+    $property_options['ANY'] = t('Any property');
+    foreach (chdbprop_get_company_relations($company_id) as $relation) {
+      $property_id = $relation['PropertyId'];
+      if (!isset($property_options[$property_id])) {
+	$property = chdbprop_get_property($property_id);
+	$property_options[$property_id] = decode_entities($property['Alias']);
+      }
+    }
+    $properties = array();
+    $properties['ANY'] = t('Any property');
+    foreach (chdbprop_get_all_properties() as $property) {
+      $properties[$property['PropertyId']] = decode_entities($property['Alias']);
+    }
+
+    if (isset($form_state['storage']['ajax']['add']['user']['PropertyId']) and
+	!in_array($form_state['storage']['ajax']['add']['user']['PropertyId'], array_keys($property_options))) {
+      unset($form_state['storage']['ajax']['add']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['add']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['add']['user']['PropertyId'])) {
+      $form_state['storage']['ajax']['add']['user']['PropertyId'] = key($property_options);
+    }
+    $form['ajax']['add']['user']['PropertyId'] =
+      array('#type' => 'select',
+	    '#title' => t('Property'),
+	    '#options' => $property_options,
+	    '#default_value' => $form_state['storage']['ajax']['add']['user']['PropertyId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $property_id = $form_state['storage']['ajax']['add']['user']['PropertyId'];
+
+    $lot_options = array();
+    $lot_options['ANY'] = 'Any lot';
+    foreach (chdbprop_get_policies($property_id) as $policy) {
+      $lot_options[$policy['LotId']] = decode_entities($policy['Alias']);
+    }
+    $lots = array();
+    $lots['ANY'] = 'Any lot';
+    foreach (chdbprop_get_all_policies() as $policy) {
+      $lots[$policy['LotId']] = decode_entities($policy['Alias']);
+    }
+    if (isset($form_state['storage']['ajax']['add']['user']['LotId']) and
+	!in_array($form_state['storage']['ajax']['add']['user']['LotId'], array_keys($lot_options))) {
+      unset($form_state['storage']['ajax']['add']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['add']['user']['LotId'])) {
+      $form_state['storage']['ajax']['add']['user']['LotId'] = key($lot_options);
+    }
+    $form['ajax']['add']['user']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['add']['user']['LotId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $lot_id = $form_state['storage']['ajax']['add']['user']['LotId'];
+
+    $form['ajax']['add']['user']['addbtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Add'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    $form['ajax']['add']['user']['clearbtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Clear'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    if (!isset($form_state['storage']['ajax']['add']['user']['rules'])) {
+      $rules = array();
+      $form_state['storage']['ajax']['add']['user']['rules'] = $rules;
+    } else {
+      $rules = unserialize($form_state['storage']['ajax']['add']['user']['rules']);
+    }
+
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      foreach ($uids as $uid) {
+	if (!$uid) {
+	  continue;
+	}
+	$rules[$uid][$company_id][$region_id][$client_id][$property_id][$lot_id] = TRUE;
+      }
+    } elseif (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $rules = array();
+    }
+
+    $header = array(t('User account'), t('Company'), t('Region'), t('Client'),
+		    t('Property'), t('Lot'));
+    $rows = array();
+    $cell_user = array();
+    $cell_company = array();
+    $cell_region = array();
+    $cell_client = array();
+    $cell_property = array();
+    $cell_lot = array();
+    foreach ($rules as $tmp_uid => $tmp_companies) {
+      $tmp_user = array('data' => $accounts[$tmp_uid], 'rowspan' => 0);
+      foreach ($tmp_companies as $tmp_company_id => $tmp_regions) {
+	$tmp_company = array('data' => $companies[$tmp_company_id], 'rowspan' => 0);
+	foreach ($tmp_regions as $tmp_region_id => $tmp_clients) {
+	  $tmp_region = array('data' => $regions[$tmp_region_id], 'rowspan' => 0);
+	  foreach ($tmp_clients as $tmp_client_id => $tmp_properties) {
+	    $tmp_client = array('data' => $clients[$tmp_client_id], 'rowspan' => 0);
+	    foreach ($tmp_properties as $tmp_property_id => $tmp_lots) {
+	      $tmp_property = array('data' => $properties[$tmp_property_id], 'rowspan' => 0);
+	      foreach ($tmp_lots as $tmp_lot_id => $tmp_final) {
+		$tmp_lot = array('data' => $lots[$tmp_lot_id], 'rowspan' => 0);
+		(int)$tmp_lot['rowspan'] += 1;
+		$tmp_property['rowspan'] += 1;
+		$tmp_client['rowspan'] += 1;
+		$tmp_region['rowspan'] += 1;
+		$tmp_company['rowspan'] +=1;
+		$tmp_user['rowspan'] += 1;
+		$cell_lot[] = $tmp_lot;
+	      }
+	      $cell_property[] = $tmp_property;
+	    }
+	    $cell_client[] = $tmp_client;
+	  }
+	  $cell_region[] = $tmp_region;
+	}
+	$cell_company[] = $tmp_company;
+      }
+      $cell_user[] = $tmp_user;
+    }
+
+    /* anai_dbg($cell_user, 'USER'); */
+    /* anai_dbg($cell_company, 'COMPANY'); */
+    /* anai_dbg($cell_region, 'REGION'); */
+    /* anai_dbg($cell_client, 'CLIENT'); */
+    /* anai_dbg($cell_property, 'PROPERTY'); */
+    /* anai_dbg($cell_lot, 'LOT'); */
+
+    if (!empty($cell_user)) {
+      $tmp_user = current($cell_user);
+      $tmp_company = current($cell_company);
+      $tmp_region = current($cell_region);
+      $tmp_client = current($cell_client);
+      $tmp_property = current($cell_property);
+      $tmp_lot = current($cell_lot);
+      $n_user = $tmp_user['rowspan'];
+      $n_company = $tmp_company['rowspan'];
+      $n_region = $tmp_region['rowspan'];
+      $n_client = $tmp_client['rowspan'];
+      $n_property = $tmp_property['rowspan'];
+      $n_lot = $tmp_lot['rowspan'];
+      while (FALSE !== $tmp_user or FALSE !== $tmp_company or FALSE !== $tmp_region or
+	     FALSE !== $tmp_client or FALSE !== $tmp_property or FALSE !== $tmp_lot) {
+	$row = array();
+
+	if (FALSE !== $tmp_user and $n_user == $tmp_user['rowspan']) {
+	  $row[] = $tmp_user;
+	  $n_user--;
+	} elseif (0 < $n_user) {
+	  $n_user--;
+	}
+	if (0 == $n_user) {
+	  $tmp_user = next($cell_user);
+	  if (FALSE !== $tmp_user) {
+	    $n_user = $tmp_user['rowspan'];
+	  }
+	}
+
+	if (FALSE !== $tmp_company and $n_company == $tmp_company['rowspan']) {
+	  $row[] = $tmp_company;
+	  $n_company--;
+	} elseif (0 < $n_company) {
+	  $n_company--;
+	}
+	if (0 == $n_company) {
+	  $tmp_company = next($cell_company);
+	  if (FALSE !== $tmp_company) {
+	    $n_company = $tmp_company['rowspan'];
+	  }
+	}
+
+	if (FALSE !== $tmp_region and $n_region == $tmp_region['rowspan']) {
+	  $row[] = $tmp_region;
+	  $n_region--;
+	} elseif (0 < $n_region) {
+	  $n_region--;
+	}
+	if (0 == $n_region) {
+	  $tmp_region = next($cell_region);
+	  if (FALSE !== $tmp_region) {
+	    $n_region = $tmp_region['rowspan'];
+	  }
+	}
+
+	if (FALSE !== $tmp_client and $n_client == $tmp_client['rowspan']) {
+	  $row[] = $tmp_client;
+	  $n_client--;
+	} elseif (0 < $n_client) {
+	  $n_client--;
+	}
+	if (0 == $n_client) {
+	  $tmp_client = next($cell_client);
+	  if (FALSE !== $tmp_client) {
+	    $n_client = $tmp_client['rowspan'];
+	  }
+	}
+
+	if (FALSE !== $tmp_property and $n_property == $tmp_property['rowspan']) {
+	  $row[] = $tmp_property;
+	  $n_property--;
+	} elseif (0 < $n_property) {
+	  $n_property--;
+	}
+	if (0 == $n_property) {
+	  $tmp_property = next($cell_property);
+	  if (FALSE !== $tmp_property) {
+	    $n_property = $tmp_property['rowspan'];
+	  }
+	}
+
+	if (FALSE !== $tmp_lot and $n_lot == $tmp_lot['rowspan']) {
+	  $row[] = $tmp_lot;
+	  $n_lot--;
+	} elseif (0 < $n_lot) {
+	  $n_lot--;
+	}
+	if (0 == $n_lot) {
+	  $tmp_lot = next($cell_lot);
+	  if (FALSE !== $tmp_lot) {
+	    $n_lot = $tmp_lot['rowspan'];
+	  }
+	}
+
+	$rows[] = $row;
+	//anai_dbg($rows);
+      }
+    }
+
+
+    $form['ajax']['add']['user']['list'] = array('#value' => theme_table($header, $rows));
+
+    $form['ajax']['add']['user']['rules'] =
+      array('#type' => 'hidden',
+	    '#value' => serialize($rules));
+  }
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#submit' => array('chpprop_users_add_form_submit_save'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpprop_users_add_form_submit_cancel'));
+  return $form;
+}
+
+function chpprop_users_add_form_submit_cancel($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['add']['CompanyId'];
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropusers';
+}
+
+function chpprop_users_add_form_submit_save($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['add']['CompanyId'];
+  // Adding assumes UID not mapped to 
+  $rules = unserialize($form_state['values']['ajax']['add']['user']['rules']);
+  foreach ($rules as $tmp_uid => $tmp_companies) {
+    foreach ($tmp_companies as $tmp_company_id => $tmp_regions) {
+      foreach ($tmp_regions as $tmp_region_id => $tmp_clients) {
+	foreach ($tmp_clients as $tmp_client_id => $tmp_properties) {
+	  foreach ($tmp_properties as $tmp_property_id => $tmp_lots) {
+	    foreach ($tmp_lots as $tmp_lot_id => $tmp_final) {
+	      if (chdbprop_insert_user
+		  ($tmp_company_id,
+		   $tmp_region_id,
+		   $tmp_client_id,
+		   $tmp_property_id,
+		   $tmp_lot_id,
+		   NULL,
+		   $tmp_uid)) {
+		drupal_set_message('Could not insert user', 'error');
+		unset($form_state['storage']);
+		$form_state['redirect'] = 'chppropusers';
+		return;
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropusers';
+}
+
+function chpprop_users_edit_form($form_state) {
+  global $user;
+  $uid = $form_state['storage']['uid'];
+  $account = user_load(array('uid' => $uid));
+
+  $roles = '';
+  foreach ($account->roles as $role) {
+    if ($role === 'authenticated user') {
+      continue;
+    }
+    $roles .= ', '.$role;
+  }
+  $roles = ltrim($roles, ', ');
+
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  //anai_dbg($company_id, '$company_id');
+  $company = chdbprop_get_company($company_id);
+
+  drupal_set_title(t('ROLES at COMPANY - NAME',
+		     array('ROLES' => $roles,
+			   'COMPANY' => decode_entities($company['Alias']),
+			   'NAME' => $account->name)));
+
+  if (user_access('anai chp edit company users')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  ahah_helper_register($form, $form_state);
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  if ($readonly) {
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/back.png',
+	    '#submit' => array('chpprop_users_edit_form_submit_back'));
+  }
+
+  // Build master arrays for name lookup only
+  $companies = array();
+  $companies['ANY'] = t('All companies');
+  foreach (chdbprop_get_all_companies() as $company) {
+    $companies[$company['CompanyId']] = decode_entities($company['Alias']);
+  }
+  $regions = array();
+  $regions['ANY'] = t('Any region');
+  foreach (chdbprop_get_all_regions() as $region) {
+    $regions[$region['RegionId']] = decode_entities($region['Alias']);
+  }
+  $clients = array();
+  $clients['ANY'] = t('Any client');
+  foreach (chdbprop_get_all_clients() as $client) {
+    $clients[$client['ClientId']] = decode_entities($client['Alias']);
+  }
+  $properties = array();
+  $properties['ANY'] = t('Any property');
+  foreach (chdbprop_get_all_properties() as $property) {
+    $properties[$property['PropertyId']] = decode_entities($property['Alias']);
+  }
+  $lots = array();
+  $lots['ANY'] = 'Any lot';
+  foreach (chdbprop_get_all_policies() as $policy) {
+    $lots[$policy['LotId']] = decode_entities($policy['Alias']);
+  }
+
+  if (!$readonly) {
+    // Layout region selector
+    $region_options = array();
+    $region_options['ANY'] = t('Any region');
+    $entries = chpprop_retrieve_regions($user->uid);
+    if (isset($entries[$company_id])) {
+      $entries = $entries[$company_id];
+    } else {
+      $entries = array();
+    }
+    foreach ($entries as $region_id => $region) {
+      $region_options[$region_id] = $regions[$region_id];
+    }
+    if (isset($form_state['storage']['ajax']['edit']['user']['RegionId']) and
+	!in_array($form_state['storage']['ajax']['edit']['user']['RegionId'],
+		  array_keys($region_options))) {
+      unset($form_state['storage']['ajax']['edit']['user']['RegionId']);
+      unset($form_state['storage']['ajax']['edit']['user']['ClientId']);
+      unset($form_state['storage']['ajax']['edit']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['edit']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['edit']['user']['RegionId'])) {
+      $form_state['storage']['ajax']['edit']['user']['RegionId'] = key($region_options);
+    }
+    $form['ajax']['edit']['user']['RegionId'] =
+      array('#type' => 'select',
+	    '#title' => t('Region'),
+	    '#options' => $region_options,
+	    '#default_value' => $form_state['storage']['ajax']['edit']['user']['RegionId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $region_id = $form_state['storage']['ajax']['edit']['user']['RegionId'];
+
+    // Layout client selector
+    $client_options = array();
+    $client_options['ANY'] = t('Any client');
+    $entries = chpprop_retrieve_clients($user->uid);
+    // Filter out selected company
+    if (isset($entries[$company_id])) {
+      $entries = $entries[$company_id];
+    } else {
+      $entries = array();
+    }
+    // Filter out selected region if other than 'ANY'
+    if ($region_id === 'ANY' and !empty($entries)) {
+      // 'ANY' means just remove whatever RegionId
+      $tmp = array();
+      foreach ($entries as $dontcarekey => $values) {
+	foreach ($values as $key => $value) {
+	  $tmp[$key] = $value;
+	}
+      }
+      $entries = $tmp;
+      $tmp = NULL;
+    } else { // Filter on selected RegionId
+      if (isset($entries[$region_id]) and isset($entries['ANY'])) {
+	$entries = array_merge($entries[$region_id], $entries['ANY']);
+      } elseif (isset($entries[$region_id])) {
+	$entries = $entries[$region_id];
+      } else {
+	$entries = array();
+      }
+    }
+    if (!empty($entries)) {
+      foreach ($entries as $client_id => $client) {
+	$client_options[$client_id] = $clients[$client_id];
+      }
+    }
+    if (isset($form_state['storage']['ajax']['edit']['user']['ClientId']) and
+	!in_array($form_state['storage']['ajax']['edit']['user']['ClientId'],
+		  array_keys($client_options))) {
+      unset($form_state['storage']['ajax']['edit']['user']['ClientId']);
+      unset($form_state['storage']['ajax']['edit']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['edit']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['edit']['user']['ClientId'])) {
+      $form_state['storage']['ajax']['edit']['user']['ClientId'] = key($client_options);
+    }
+    $form['ajax']['edit']['user']['ClientId'] =
+      array('#type' => 'select',
+	    '#title' => t('Client'),
+	    '#options' => $client_options,
+	    '#default_value' => $form_state['storage']['ajax']['edit']['user']['ClientId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $client_id = $form_state['storage']['ajax']['edit']['user']['ClientId'];
+
+    // Layout property selector
+    $property_options = array();
+    $property_options['ANY'] = t('Any property');
+    $entries = chpprop_retrieve_properties($user->uid, $company_id);
+    if (isset($entries[$company_id])) {
+      $entries = $entries[$company_id];
+    } else {
+      $entries = array();
+    }
+    foreach ($entries as $property_id => $property) {
+      $property_options[$property_id] = $properties[$property_id];
+    }
+    if (isset($form_state['storage']['ajax']['edit']['user']['PropertyId']) and
+	!in_array($form_state['storage']['ajax']['edit']['user']['PropertyId'],
+		  array_keys($property_options))) {
+      unset($form_state['storage']['ajax']['edit']['user']['PropertyId']);
+      unset($form_state['storage']['ajax']['edit']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['edit']['user']['PropertyId'])) {
+      $form_state['storage']['ajax']['edit']['user']['PropertyId'] = key($property_options);
+    }
+    $form['ajax']['edit']['user']['PropertyId'] =
+      array('#type' => 'select',
+	    '#title' => t('Property'),
+	    '#options' => $property_options,
+	    '#default_value' => $form_state['storage']['ajax']['edit']['user']['PropertyId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $property_id = $form_state['storage']['ajax']['edit']['user']['PropertyId'];
+
+    // Layout lot selector
+    $lot_options = array();
+    $lot_options['ANY'] = 'Any lot';
+    $entries = chpprop_retrieve_policies($user->uid, $company_id);
+    if (isset($entries[$company_id])) {
+      $entries = $entries[$company_id];
+    } else {
+      $entries = array();
+    }
+    foreach ($entries as $lot_id => $policy) {
+      $lot_options[$lot_id] = $lots[$lot_id];
+    }
+    if (isset($form_state['storage']['ajax']['edit']['user']['LotId']) and
+	!in_array($form_state['storage']['ajax']['edit']['user']['LotId'], array_keys($lot_options))) {
+      unset($form_state['storage']['ajax']['edit']['user']['LotId']);
+    }
+    if (!isset($form_state['storage']['ajax']['edit']['user']['LotId'])) {
+      $form_state['storage']['ajax']['edit']['user']['LotId'] = key($lot_options);
+    }
+    $form['ajax']['edit']['user']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['edit']['user']['LotId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $lot_id = $form_state['storage']['ajax']['edit']['user']['LotId'];
+
+    $form['ajax']['edit']['user']['addbtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Add'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    $form['ajax']['edit']['user']['clearbtn'] =
+      array('#type' => 'button',
+	    '#value' => t('Clear'),
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  // Layout users
+  if (!isset($form_state['storage']['ajax']['edit']['user']['rules'])) {
+    $defaults = array();
+    $rules = array();
+    $default_ids = array();
+    foreach (chpprop_retrieve_users($uid, $company_id) as $role => $dbusers) {
+      foreach ($dbusers as $dbuid => $dbrules) {
+	foreach ($dbrules['Rules'] as $dbuser) {
+	  $rules
+	    [$uid]
+	    [$dbuser['CompanyId']]
+	    [$dbuser['RegionId']]
+	    [$dbuser['ClientId']]
+	    [$dbuser['PropertyId']]
+	    [$dbuser['LotId']] = $dbuser['Id'];
+	  $default_ids[$uid][$dbuser['Id']] = TRUE;
+	}
+      }
+    }
+    $defaults = $rules;
+    $form_state['storage']['ajax']['edit']['user']['rules'] = $rules;
+  } else {
+    $rules = unserialize($form_state['storage']['ajax']['edit']['user']['rules']);
+    $defaults = unserialize($form_state['storage']['ajax']['edit']['user']['defaults']);
+    $default_ids = unserialize($form_state['storage']['ajax']['edit']['user']['default_ids']);
+  }
+
+  if (!$readonly) {
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      $rules[$uid][$company_id][$region_id][$client_id][$property_id][$lot_id] = TRUE;
+    } elseif (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $rules = array();
+    }
+  }
+
+  //anai_dbg($rules, '$rules');
+
+  $header = array(t('User account'), t('Company'), t('Region'), t('Client'),
+		  t('Property'), t('Lot'));
+  $rows = array();
+  $cell_user = array();
+  $cell_company = array();
+  $cell_region = array();
+  $cell_client = array();
+  $cell_property = array();
+  $cell_lot = array();
+  if (isset($rules[$uid])) {
+    $tmp_user = array('data' => $account->name, 'rowspan' => 0);
+    foreach ($rules[$uid] as $tmp_company_id => $tmp_regions) {
+      $tmp_company = array('data' => $companies[$tmp_company_id], 'rowspan' => 0);
+      foreach ($tmp_regions as $tmp_region_id => $tmp_clients) {
+	$tmp_region = array('data' => $regions[$tmp_region_id], 'rowspan' => 0);
+	foreach ($tmp_clients as $tmp_client_id => $tmp_properties) {
+	  $tmp_client = array('data' => $clients[$tmp_client_id], 'rowspan' => 0);
+	  foreach ($tmp_properties as $tmp_property_id => $tmp_lots) {
+	    $tmp_property = array('data' => $properties[$tmp_property_id], 'rowspan' => 0);
+	    foreach ($tmp_lots as $tmp_lot_id => $tmp_final) {
+	      $tmp_lot = array('data' => $lots[$tmp_lot_id], 'rowspan' => 0);
+	      (int)$tmp_lot['rowspan'] += 1;
+	      $tmp_property['rowspan'] += 1;
+	      $tmp_client['rowspan'] += 1;
+	      $tmp_region['rowspan'] += 1;
+	      $tmp_company['rowspan'] +=1;
+	      $tmp_user['rowspan'] += 1;
+	      $cell_lot[] = $tmp_lot;
+	    }
+	    $cell_property[] = $tmp_property;
+	  }
+	  $cell_client[] = $tmp_client;
+	}
+	$cell_region[] = $tmp_region;
+      }
+      $cell_company[] = $tmp_company;
+    }
+    $cell_user[] = $tmp_user;
+  }
+
+  if (!empty($cell_user)) {
+    $tmp_user = current($cell_user);
+    $tmp_company = current($cell_company);
+    $tmp_region = current($cell_region);
+    $tmp_client = current($cell_client);
+    $tmp_property = current($cell_property);
+    $tmp_lot = current($cell_lot);
+    $n_user = $tmp_user['rowspan'];
+    $n_company = $tmp_company['rowspan'];
+    $n_region = $tmp_region['rowspan'];
+    $n_client = $tmp_client['rowspan'];
+    $n_property = $tmp_property['rowspan'];
+    $n_lot = $tmp_lot['rowspan'];
+    while (FALSE !== $tmp_user or FALSE !== $tmp_company or FALSE !== $tmp_region or
+	   FALSE !== $tmp_client or FALSE !== $tmp_property or FALSE !== $tmp_lot) {
+      $row = array();
+
+      if (FALSE !== $tmp_user and $n_user == $tmp_user['rowspan']) {
+	$row[] = $tmp_user;
+	$n_user--;
+      } elseif (0 < $n_user) {
+	$n_user--;
+      }
+      if (0 == $n_user) {
+	$tmp_user = next($cell_user);
+	if (FALSE !== $tmp_user) {
+	  $n_user = $tmp_user['rowspan'];
+	}
+      }
+
+      if (FALSE !== $tmp_company and $n_company == $tmp_company['rowspan']) {
+	$row[] = $tmp_company;
+	$n_company--;
+      } elseif (0 < $n_company) {
+	$n_company--;
+      }
+      if (0 == $n_company) {
+	$tmp_company = next($cell_company);
+	if (FALSE !== $tmp_company) {
+	  $n_company = $tmp_company['rowspan'];
+	}
+      }
+
+      if (FALSE !== $tmp_region and $n_region == $tmp_region['rowspan']) {
+	$row[] = $tmp_region;
+	$n_region--;
+      } elseif (0 < $n_region) {
+	$n_region--;
+      }
+      if (0 == $n_region) {
+	$tmp_region = next($cell_region);
+	if (FALSE !== $tmp_region) {
+	  $n_region = $tmp_region['rowspan'];
+	}
+      }
+
+      if (FALSE !== $tmp_client and $n_client == $tmp_client['rowspan']) {
+	$row[] = $tmp_client;
+	$n_client--;
+      } elseif (0 < $n_client) {
+	$n_client--;
+      }
+      if (0 == $n_client) {
+	$tmp_client = next($cell_client);
+	if (FALSE !== $tmp_client) {
+	  $n_client = $tmp_client['rowspan'];
+	}
+      }
+
+      if (FALSE !== $tmp_property and $n_property == $tmp_property['rowspan']) {
+	$row[] = $tmp_property;
+	$n_property--;
+      } elseif (0 < $n_property) {
+	$n_property--;
+      }
+      if (0 == $n_property) {
+	$tmp_property = next($cell_property);
+	if (FALSE !== $tmp_property) {
+	  $n_property = $tmp_property['rowspan'];
+	}
+      }
+
+      if (FALSE !== $tmp_lot and $n_lot == $tmp_lot['rowspan']) {
+	$row[] = $tmp_lot;
+	$n_lot--;
+      } elseif (0 < $n_lot) {
+	$n_lot--;
+      }
+      if (0 == $n_lot) {
+	$tmp_lot = next($cell_lot);
+	if (FALSE !== $tmp_lot) {
+	  $n_lot = $tmp_lot['rowspan'];
+	}
+      }
+
+      $rows[] = $row;
+      //anai_dbg($rows);
+    }
+  }
+
+  $form['ajax']['edit']['user']['list'] = array('#value' => theme_table($header, $rows));
+
+  $form['ajax']['edit']['user']['rules'] =
+    array('#type' => 'hidden',
+	  '#value' => serialize($rules));
+  $form['ajax']['edit']['user']['defaults'] =
+    array('#type' => 'hidden',
+	  '#value' => serialize($defaults));
+  $form['ajax']['edit']['user']['default_ids'] =
+    array('#type' => 'hidden',
+	  '#value' => serialize($default_ids));
+
+  if (!$readonly) {
+    $form['save'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/save.png',
+	    '#submit' => array('chpprop_users_edit_form_submit_save'));
+    $form['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chpprop_users_edit_form_submit_back'));
+  }
+  return $form;
+}
+
+function chpprop_users_edit_form_submit_back($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['CompanyId'];
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropusers';
+}
+
+function chpprop_users_edit_form_submit_save($form, &$form_state) {
+  $_SESSION['anai']['TemporaryCompanyId'] = $form_state['values']['ajax']['CompanyId'];
+  $rules = unserialize($form_state['values']['ajax']['edit']['user']['rules']);
+  $defaults = unserialize($form_state['values']['ajax']['edit']['user']['defaults']);
+  $default_ids = unserialize($form_state['values']['ajax']['edit']['user']['default_ids']);
+
+  if (empty($rules)) { // ... meaning delete all
+    foreach ($default_ids as $uid => $ids) {
+      foreach ($ids as $id => $value) {
+	if (chdbprop_delete_user_id($id)) {
+	  drupal_set_message('Could not delete user', 'error');
+	  unset($form_state['storage']);
+	  $form_state['redirect'] = 'chppropusers';
+	  return;
+	}
+      }
+    }
+    // ... and leave
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppropusers';
+    return;
+  }
+
+  foreach ($rules as $tmp_uid => $tmp_companies) {
+    foreach ($tmp_companies as $tmp_company_id => $tmp_regions) {
+      foreach ($tmp_regions as $tmp_region_id => $tmp_clients) {
+	foreach ($tmp_clients as $tmp_client_id => $tmp_properties) {
+	  foreach ($tmp_properties as $tmp_property_id => $tmp_lots) {
+	    foreach ($tmp_lots as $tmp_lot_id => $id) {
+	      if (isset($defaults
+			[$tmp_uid]
+			[$tmp_company_id]
+			[$tmp_region_id]
+			[$tmp_client_id]
+			[$tmp_property_id]
+			[$tmp_lot_id])) {
+		// The entry existed from earlier, just update
+		if (chdbprop_update_user
+		    ($id,
+		     $tmp_company_id,
+		     $tmp_region_id,
+		     $tmp_client_id,
+		     $tmp_property_id,
+		     $tmp_lot_id,
+		     NULL)) {
+		  drupal_set_message('Could not update user', 'error');
+		  unset($form_state['storage']);
+		  $form_state['redirect'] = 'chppropusers';
+		  return;
+		}
+		// Mark entry as altered
+		$default_ids[$tmp_uid][$id] = FALSE;
+	      } else { // Insert new
+		if (chdbprop_insert_user
+		    ($tmp_company_id,
+		     $tmp_region_id,
+		     $tmp_client_id,
+		     $tmp_property_id,
+		     $tmp_lot_id,
+		     NULL,
+		     $tmp_uid)) {
+		  drupal_set_message('Could not insert user', 'error');
+		  unset($form_state['storage']);
+		  $form_state['redirect'] = 'chppropusers';
+		  return;
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  // Delete those entries that was not renewed
+  foreach ($default_ids as $uid => $ids) {
+    foreach ($ids as $id => $value) {
+      if ($value) {
+	if (chdbprop_delete_user_id($id)) {
+	  drupal_set_message('Could not delete user', 'error');
+	  unset($form_state['storage']);
+	  $form_state['redirect'] = 'chppropusers';
+	  return;
+	}
+      }
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropusers';
+}
+
+function chpprop_users_form_submit($form, &$form_state) {
+  $uid = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (FALSE !== strpos($key, 'op_managers')) {
+      $uid = substr($key, strlen('op_managers'));
+      break;
+    } elseif (strstr($key, 'op_staff')) {
+      $uid = substr($key, strlen('op_staff'));
+      break;
+    } elseif (strstr($key, 'op_enforcers')) {
+      $uid = substr($key, strlen('op_enforcers'));
+      break;
+    } elseif (strstr($key, 'op_tenant')) {
+      $uid = substr($key, strlen('op_tenant'));
+      break;
+    }
+  }
+  if ($uid > 0) {
+    $form_state['storage']['uid'] = $uid;
+    $form_state['storage']['edit_user'] = TRUE;
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Relations add
+ ********** Address: chppropreladd
+ ********** Access:  'anai chp add relations'
+ *********/
+
+
+
+function chpprop_relations_add_form($form_state) {
+  drupal_set_title(t('Add relation'));
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+
+  $options = array();
+  // As Admin, get all regardless of relations
+  if ((in_array('Admin', array_values($account->roles)) and $account->status) or
+      $account->uid == 1) {
+    foreach (chdbprop_get_all_companies() as $company) {
+      $options[$company['CompanyId']] =
+	decode_entities($company['Alias']).', '.
+	decode_entities($company['Street']).', '.
+	decode_entities($company['City']);
+    }
+  } else {
+    foreach (chpprop_retrieve_companies($user->uid) as $company_id => $company) {
+      $company_options[$company_id] =
+	decode_entities($company['data']['Alias']).', '.
+	decode_entities($company['data']['Street']).', '.
+	decode_entities($company['data']['City']);
+    }
+  }
+
+  if (count($options) == 0) {
+    $form['empty'] =
+      array('#value' => t('No company registered.').'<p><p>');
+    $form['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chpprop_relations_add_form_submit_back'));
+    return $form;
+  }
+
+  $form['CompanyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Company'),
+	  '#options' => $options);
+
+  $options = array();
+  foreach (chdbprop_get_all_properties() as $property) {
+    $options[$property['PropertyId']] =
+      decode_entities($property['Alias']).', '.
+      decode_entities($property['Street']).', '.
+      decode_entities($property['City']);
+  }
+
+  if (count($options) == 0) {
+    $form['empty'] =
+      array('#value' => t('No property registered.').'<p><p>');
+    $form['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#validate' => array('chpprop_relations_add_form_validate_cancel'));
+    return $form;
+  }
+
+  $form['PropertyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Property'),
+	  '#options' => $options);
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#submit' => array('chpprop_relations_add_form_submit_save'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpprop_relations_add_form_submit_back'));
+  return $form;
+}
+
+function chpprop_relations_add_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpproprel';
+}
+
+function chpprop_relations_add_form_submit_save($form, &$form_state) {
+  $relations_id = chpprop_genRandomString20();
+
+  if (chdbprop_insert_relation
+      ($relations_id,
+       $form_state['values']['PropertyId'],
+       $form_state['values']['CompanyId'],
+       $id)) {
+    drupal_set_message('Couldn\'t insert relation', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpproprel';
+  return;
+}
+
+
+
+
+/**********
+ ********** Relations list
+ ********** Address: chpproprel
+ ********** Access:  'anai chp list relations'
+ *********/
+
+
+
+function chpprop_relations_form($form_state) {
+  if ($form_state['storage']['detailed_edit']) {
+    return chpprop_relations_edit_form($form_state);
+  }
+
+  global $user;
+  drupal_set_title(t('Relations'));
+
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/back.png',
+  	  '#submit' => array('chpprop_relations_form_submit_back'));
+
+  if (user_access('anai chp add relations')) {
+    $form['add'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/add.png',
+	    '#submit' => array('chpprop_relations_form_submit_add'));
+  }
+
+  $form['linebreak'] = array('#value' => '<p>');
+
+  if (user_access('anai chp list companies')) {
+    $form['companies'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai_chpproperties').'/companies.png',
+	    '#attributes' => array('width' => '15%'),
+	    '#submit' => array('chpprop_relations_form_submit_companies'));
+  }
+
+  if (user_access('anai chp list regions')) {
+    $form['regions'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai_chpproperties').'/regions.png',
+	    '#attributes' => array('width' => '15%'),
+	    '#submit' => array('chpprop_relations_form_submit_regions'));
+  }
+
+  if (user_access('anai chp list clients')) {
+    $form['clients'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai_chpproperties').'/clients.png',
+	    '#attributes' => array('width' => '15%'),
+	    '#submit' => array('chpprop_relations_form_submit_clients'));
+  }
+
+  if (user_access('anai chp list enforcers')) {
+    $form['enforcers'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai_chpproperties').'/enforcers.png',
+	    '#attributes' => array('width' => '15%'),
+	    '#submit' => array('chpprop_relations_form_submit_enforcers'));
+  }
+
+  if (user_access('anai chp list company users')) {
+    $form['users'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai_chpproperties').'/accounts.png',
+	    '#attributes' => array('width' => '15%'),
+	    '#submit' => array('chpprop_relations_form_submit_users'));
+  }
+
+  $relations = chpprop_retrieve_relations($user->uid);
+
+  $entries = array();
+  foreach ($relations as $relations_id => $relation) {
+    $company_id = $relation['data']['CompanyId'];
+    $company = chdbprop_get_company($company_id);
+    $property_id = $relation['data']['PropertyId'];
+    $property = chdbprop_get_property($property_id);
+
+    $entries[$company_id]['Alias'] =
+      decode_entities($company['Alias']).', '.
+      decode_entities($company['Street']).', '.
+      decode_entities($company['City']);
+    $entries[$company_id]['data'][$property_id]['Id'] = $relation['data']['Id'];
+    $entries[$company_id]['data'][$property_id]['RelationId'] = $relations_id;
+    $entries[$company_id]['data'][$property_id]['Alias'] =
+      decode_entities($property['Alias']).', '.
+      decode_entities($property['Street']).', '.
+      decode_entities($property['City']);
+  }
+
+  if (empty($entries)) {
+    $form['empty'] =
+      array('#value' => '<p>'.t('Empty. No registered relations.'));
+  } else {
+    $form['list'] = chpprop_relations_list_table_form($entries);
+  }
+
+  return $form;
+}
+
+function chpprop_relations_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpprop_relations_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropreladd';
+}
+
+function chpprop_relations_form_submit_companies($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropcomp';
+}
+
+function chpprop_relations_form_submit_regions($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropregion';
+}
+
+function chpprop_relations_form_submit_clients($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropclient';
+}
+
+function chpprop_relations_form_submit_users($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropusers';
+}
+
+function chpprop_relations_form_submit_enforcers($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppropenfs';
+}
+
+function chpprop_relations_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup',
+	  '#theme' => 'chpprop_relations_table');
+
+  if (user_access('anai chp edit relations') or
+      in_array('Admin', array_values($user->roles)) or
+      $user->uid == 1) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $company_id => $entry) {
+    $form['db']['company_'.$looper] = array('#value' => $entry['Alias']);
+
+    $form['db']['numfrags_'.$looper.'_'.count($entry['data'])] =
+      array('#type' => 'hidden', '#value' => '');
+
+    $num = 0;
+    foreach ($entry['data'] as $property_id => $property) {
+      $form['db']['props_'.$looper.'_'.$num] = array('#value' => $property['Alias']);
+
+      if ($readonly) {
+	$form['db']['details_'.$looper.'_'.$num] = array('#value' => '');
+      } else {
+	$form['db']['details_'.$looper.'_'.$num] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+		'#name' => 'op_details'.$property['Id']);
+      }
+      $num++;
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpprop_relations_table($form) {
+  $header = array(t('Company'), t('Property'), '');
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'numfrags_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('numfrags_'));
+    $looper = substr($looper, 0, strpos($looper, '_'));
+    $numfrags = substr($key, strlen('numfrags_'.$looper.'_'));
+
+    $rows[] = array(array('data' => drupal_render($form['company_'.$looper]),
+			  'rowspan' => $numfrags),
+		    drupal_render($form['props_'.$looper.'_0']),
+		    array('data' => drupal_render($form['details_'.$looper.'_0']),
+			  'width' => 1, 'height' => 1),
+                    );
+    for ($i = 1; $i < $numfrags; $i++) {
+      $rows[] = array(drupal_render($form['props_'.$looper.'_'.$i]),
+		      array('data' => drupal_render($form['details_'.$looper.'_'.$i]),
+			    'width' => 1, 'height' => 1));
+    }
+  }
+  return theme_table($header, $rows);
+}
+
+function chpprop_relations_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete_relation']) {
+    return confirm_form($form, 'Are you sure?', 'chpproprel',
+			'The relation will be deleted from the system.');
+  }
+
+  $id = $form_state['storage']['id'];
+  $relation = chdbprop_get_relation_id($id);
+  drupal_set_title(t('Edit relation'));
+
+  $options = array();
+  foreach (chdbprop_get_all_companies() as $company) {
+    $options[$company['CompanyId']] =
+      decode_entities($company['Alias']).', '.
+      decode_entities($company['Street']).', '.
+      decode_entities($company['City']);
+  }
+  $form['CompanyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Company'),
+	  '#options' => $options,
+	  '#default_value' => $relation['CompanyId']);
+
+  $options = array();
+  foreach (chdbprop_get_all_properties() as $property) {
+    $options[$property['PropertyId']] =
+      decode_entities($property['Alias']).', '.
+      decode_entities($property['Street']).', '.
+      decode_entities($property['City']);
+  }
+  $form['PropertyId'] =
+    array('#type' => 'select',
+	  '#title' => t('Properties'),
+	  '#options' => $options,
+	  '#default_value' => $relation['PropertyId']);
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#submit' => array('chpprop_relations_edit_form_submit_save'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpprop_relations_edit_form_submit_back'));
+
+  if (user_access('anai chp delete relations')) {
+    $form['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+	    '#validate' => array('chpprop_relations_edit_form_validate_delete'),
+	    '#submit' => array('chpprop_relations_form_submit'));
+  }
+  return $form;
+}
+
+function chpprop_relations_edit_form_validate_delete($form, &$form_state) {
+  $form_state['storage']['delete_relation'] = TRUE;
+}
+
+function chpprop_relations_edit_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpproprel';
+}
+
+function chpprop_relations_edit_form_submit_save($form, &$form_state) {
+  $id = $form_state['storage']['id'];
+
+  if (chdbprop_update_relation
+      ($id,
+       $form_state['values']['PropertyId'],
+       $form_state['values']['CompanyId'])) {
+    drupal_set_message('Couldn\'t update relation', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpproprel';
+}
+
+function chpprop_relations_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete_relation']) {
+    $id = $form_state['storage']['id'];
+    chdbprop_delete_relation_id($id);
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpproprel';
+    return;
+  }
+  if ($form_state['storage']['delete_relation']) {
+    $form_state['storage']['confirm_delete_relation'] = TRUE;
+    return;
+  }
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_details')) {
+      $id = substr($key, strlen('op_details'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+  }
+}
+
+
+
+
+/**********
+ ********** Property locatin map
+ ********** Address: chppropmap
+ ********** Access:  'anai chp view property location map'
+ *********/
+
+
+
+function chpprop_property_map_form($form_state) {
+  drupal_set_title(t('Location map'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_properties'] = TRUE;
+  $settings['show_all_properties'] = FALSE; // Default value
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['validate'] = 'chpprop_property_map_form_validate_back';
+  $settings['buttons']['back']['submit'] = 'chpprop_property_map_form_submit';
+  if (chpprop_produce_header($form, $form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+  $companies = $form_state['storage']['property']['Companies'];
+  $properties = $form_state['storage']['property']['Properties'];
+  $lots = $form_state['storage']['property']['Lots'];
+  $policies = $lots[$property_id];
+
+  if (sizeof($properties) == 0) {
+    $form['property']['empty'] =
+      array('#value' => '<p><p>'.t('Empty. No registered properties.').'<p>');
+    return $form;
+  }
+
+  $map_array = array();
+  $map_array['id'] = 'LocationMap';
+  $map_array['width'] = '100%';
+  $map_array['height'] = '480px';
+  $map_array['latitude'] = '43.782869';
+  $map_array['longitude'] = '-79.537325';
+  $map_array['maptype'] = 'Map';
+  $map_array['controltype'] = 'Large';
+  $map_array['zoom'] = '7';
+  $map_array['mtc'] = 'standard';
+
+  $map_array['behavior'] =
+    array('locpick' => FALSE,
+  	  'nodrag' => FALSE,
+  	  'nokeyboard' => TRUE,
+  	  'overview' => TRUE,
+  	  'autozoom' => TRUE,
+  	  'scale' => TRUE,
+  	  'clickableshapes' => TRUE,
+  	  );
+
+  $markers = array();
+  if ($form_state['storage']['property']['all_properties']) {
+    foreach ($properties as $property) {
+      $markers[] = array
+  	('text' => chpprop_property_map_bobble_text
+  	 ($company_id, $property['data']['PropertyId'],
+  	  $property['data']['Alias'], $lots[$property['data']['PropertyId']]),
+  	 'latitude' => sprintf("%f", $property['data']['Lat']),
+  	 'longitude' => sprintf("%f", $property['data']['Lon']),
+  	 'markername' => 'blue',
+  	 );
+    }
+  } else {
+    $markers[] = array
+      ('text' => chpprop_property_map_bobble_text
+       ($company_id, $property_id,
+  	$properties[$property_id]['data']['Alias'], $policies),
+       'latitude' => sprintf("%f", $properties[$property_id]['data']['Lat']),
+       'longitude' => sprintf("%f", $properties[$property_id]['data']['Lon']),
+       'markername' => 'blue',
+       );
+  }
+  $map_array['markers'] = $markers;
+
+  if (count($companies) > 1 or count($properties) > 1) {
+    $form['property']['update'] =
+      array('#type' => 'button',
+  	    '#value' => t('Update map'));
+  }
+
+  $form['map'] = array('#value' => theme('gmap', array('#settings' => $map_array)));
+  return $form;
+}
+
+function chpprop_property_map_form_validate_back($form, &$form_state) {
+  $form_state['storage']['home'] = TRUE;
+}
+
+function chpprop_property_map_form_submit($form, &$form_state) {
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+}
+
+function chpprop_property_map_bobble_text($company_id, $property_id, $alias, $policies) {
+  $text = '<h2>'.$alias.'</h2>';
+
+  $cache = array();
+  foreach ($policies as $policy) {
+    $profile_id = $policy['data']['ProfileId'];
+    $lot_id = $policy['data']['LotId'];
+    $all_lots = FALSE;
+    if (!isset($cache[$profile_id])) {
+      $profile = chdbprop_get_profile($profile_id);
+      $cache[$profile_id] = $profile;
+    } else {
+      $profile = $cache[$profile_id];
+    }
+
+    $text .= '<h3>'.$policy['data']['Alias'].':</h3>';
+
+    if ($profile['LongPolicy'] or $profile['ShortPolicy'] or $profile['LongShortPolicy']) {
+      if ($profile['LongPolicy'] or $profile['LongShortPolicy']) {
+	$permits = chdbperm_get_permits($company_id, $property_id,
+					TRUE, $lot_id,
+					TRUE, TRUE, // Active
+					TRUE, TRUE, // Long
+					TRUE, FALSE); // Short
+
+	// Sort shared permits
+	$shared = array();
+	$included = 0;
+	foreach ($permits as $entry) {
+	  if (empty($entry['SharedId'])) {
+	    continue;
+	  }
+	  if (!isset($shared[$entry['SharedId']])) {
+	    $shared[$entry['SharedId']] = 1;
+	  } else {
+	    $shared[$entry['SharedId']]++;
+	  }
+	  $included++;
+	}
+
+	$num = count($permits) - $included + count($shared);
+	$text .= 'Number of '.strtolower($profile['LongPolicyAlias']).' permits: '.$num.'<br>';
+      }
+
+      if ($profile['ShortPolicy'] or $profile['LongShortPolicy']) {
+	$permits = chdbperm_get_permits($company_id, $property_id,
+					TRUE, $lot_id,
+					TRUE, TRUE, // Active
+					TRUE, FALSE, // Long
+					TRUE, TRUE); // Short
+
+	// Sort shared permits
+	$shared = array();
+	$included = 0;
+	foreach ($permits as $entry) {
+	  if (empty($entry['SharedId'])) {
+	    continue;
+	  }
+	  if (!isset($shared[$entry['SharedId']])) {
+	    $shared[$entry['SharedId']] = 1;
+	  } else {
+	    $shared[$entry['SharedId']]++;
+	  }
+	  $included++;
+	}
+
+	$num = count($permits) - $included + count($shared);
+	$text .= 'Number of '.strtolower($profile['ShortPolicyAlias']).' permits: '.$num.'<br>';
+      }
+
+      // Groups TBD
+    }
+
+    if ($profile['ValetPolicy']) {
+      $num = count(chdbvalet_get_valets($company_id, $property_id, $lot_id));
+      $text .= 'Number of valets: '.$num.'<br>';
+    }
+
+    if ($profile['EnforcementPolicy']) {
+      if ($profile['Ticketing']) {
+	$num = count(chdbtick_get_tickets($company_id, $property_id,
+					  TRUE, $lot_id));
+	$text .= 'Number of parking tickets: '.$num.'<br>';
+      }
+      if ($profile['Booting']) {
+	$num = count(chdbboot_get_boots($company_id,
+					TRUE, $property_id,
+					TRUE, $lot_id,
+					TRUE, TRUE)); // Active
+	$text .= 'Number of booted vehicles: '.$num.'<br>';
+      }
+      if ($profile['Towing']) {
+	$num = count(chdbtow_get_towings($company_id, $property_id,
+					 TRUE, $lot_id));
+	$text .= 'Number of towed vehicles: '.$num.'<br>';
+      }
+    }
+  }
+  return $text;
+}
+

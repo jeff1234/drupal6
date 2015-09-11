@@ -1,0 +1,2686 @@
+<?php
+require_once("anai_chpreports.inc");
+require_once("anai_chpreports_permit.inc");
+require_once("anai_chpreports_occupancy.inc");
+require_once("anai_chpreports_meter.inc");
+require_once("anai_chpreports_lane.inc");
+
+
+/**
+ * @file
+ * CHP Reports
+ *
+ * ANAI CHP Reports module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpreports_perm() {
+  return array('anai chp create reports',
+	       // Permit reports
+	       'anai chp permit activation deactivation report',
+	       'anai chp permit container usage report',
+	       // Validation reports
+	       'anai chp validation type report',
+	       // Old reports needing cleanup
+	       'anai chp access permit report',
+	       'anai chp access whitelist report',
+	       'anai chp access permit container report',
+	       'anai chp access tickets report',
+	       'anai chp access complaints report',
+	       'anai chp access boots report',
+	       'anai chp access permit revenue report',
+	       'anai chp access ticket revenue report',
+	       // Occupancy reports
+	       'anai chp occupancy group report',
+	       'anai chp occupancy member report',
+	       'anai chp occupancy public report',
+	       'anai chp occupancy compliancy report',
+	       // Meter reports
+	       'anai chp meter creditcard report',
+	       'anai chp meter cash report',
+	       'anai chp meter revenue report',
+	       'anai chp meter merchantcode report', // Tore 131225: Added
+	       // Lane reports
+	       'anai chp lane count report',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpreports_menu() {
+  $items = array();
+  $items['chpreportcreate'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpreport_create_form'),
+     'access arguments' => array('anai chp create reports'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpreport'] = array
+    ('page callback' => 'chpreport_browser_form',
+     'access arguments' => array('anai chp create reports'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpreportcsv'] = array
+    ('page callback' => 'chpreport_csv_form',
+     'access arguments' => array('anai chp create reports'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Create report
+ ********** Address: chpreportcreate
+ ********** Access:  'anai chp create reports'
+ *********/
+
+
+
+function chpreport_create_form($form_state) {
+  drupal_set_title(t('Reports'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['include_company_any'] = TRUE;
+  $settings['display_single_company'] = TRUE;
+  $settings['show_regions'] = TRUE;
+  $settings['include_region_any'] = TRUE;
+  $settings['display_single_region'] = TRUE;
+  $settings['show_clients'] = TRUE;
+  $settings['include_client_any'] = TRUE;
+  $settings['display_single_client'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['include_property_any'] = TRUE;
+  $settings['display_single_property'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['include_lot_any'] = TRUE;
+  $settings['display_single_lot'] = TRUE;
+  $settings['option']['skippropertynotes'] = TRUE;
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['submit'] = 'chpreport_create_form_submit_back';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $region_id = $form_state['storage']['ajax']['RegionId'];
+  $client_id = $form_state['storage']['ajax']['ClientId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $reports = array();
+
+  // Create report category and type options from property/lot
+  if ($property_id === 'ANY') {
+    foreach ($form_state['storage']['ajax']['Lots'] as $propkey => $lots) {
+      foreach ($form_state['storage']['ajax']['Lots'][$propkey] as $lotkey => $policy) {
+	$profile_id = $policy['data']['ProfileId'];
+	if (!isset($profiles[$profile_id])) {
+	  $profiles[$profile_id] = chdbprop_get_profile($profile_id);
+	}
+	$enforcement_id = $policy['data']['EnforcementId'];
+	if (!empty($enforcement_id)) {
+	  if (!isset($enforcements[$enforcement_id])) {
+	    $enforcements[$enforcement_id] = chdbprop_get_enforcement($enforcement_id);
+	  }
+	} else {
+	  $enforcements[$enforcement_id] = array();
+	}
+	$equipment_id = $policy['data']['EquipmentId'];
+	if (!empty($equipment_id)) {
+	  if (!isset($equipments[$equipment_id])) {
+	    $equipments[$equipment_id] = chdbprop_get_equipment($equipment_id);
+	  }
+	} else {
+	  $equipments[$equipment_id] = array();
+	}
+	chpreport_retrieve_category_type($profiles[$profile_id],
+					 $equipments[$equipment_id],
+					 $enforcements[$enforcement_id],
+					 $reports);
+      }
+    }
+  } elseif ($lot_id === 'ANY') {
+    foreach ($form_state['storage']['ajax']['Lots'][$property_id] as $lotkey => $policy) {
+      $profile_id = $policy['data']['ProfileId'];
+      if (!isset($profiles[$profile_id])) {
+	$profiles[$profile_id] = chdbprop_get_profile($profile_id);
+      }
+      $enforcement_id = $policy['data']['EnforcementId'];
+      if (!empty($enforcement_id)) {
+	if (!isset($enforcements[$enforcement_id])) {
+	  $enforcements[$enforcement_id] = chdbprop_get_enforcement($enforcement_id);
+	}
+      } else {
+	$enforcements[$enforcement_id] = array();
+      }
+      $equipment_id = $policy['data']['EquipmentId'];
+      if (!empty($equipment_id)) {
+	if (!isset($equipments[$equipment_id])) {
+	  $equipments[$equipment_id] = chdbprop_get_equipment($equipment_id);
+	}
+      } else {
+	$equipments[$equipment_id] = array();
+      }
+      chpreport_retrieve_category_type($profiles[$profile_id],
+				       $equipments[$equipment_id],
+				       $enforcements[$enforcement_id],
+				       $reports);
+    }
+  } else {
+    $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+    $profile_id = $policy['data']['ProfileId'];
+    if (!isset($profiles[$profile_id])) {
+      $profiles[$profile_id] = chdbprop_get_profile($profile_id);
+    }
+    $enforcement_id = $policy['data']['EnforcementId'];
+    if (!empty($enforcement_id)) {
+      if (!isset($enforcements[$enforcement_id])) {
+	$enforcements[$enforcement_id] = chdbprop_get_enforcement($enforcement_id);
+      }
+    } else {
+      $enforcements[$enforcement_id] = array();
+    }
+    $equipment_id = $policy['data']['EquipmentId'];
+    if (!empty($equipment_id)) {
+      if (!isset($equipments[$equipment_id])) {
+	$equipments[$equipment_id] = chdbprop_get_equipment($equipment_id);
+      }
+    } else {
+      $equipments[$equipment_id] = array();
+    }
+    chpreport_retrieve_category_type($profiles[$profile_id],
+				     $equipments[$equipment_id],
+				     $enforcements[$enforcement_id],
+				     $reports);
+  }
+  $profiles = NULL;
+  $enforcements = NULL;
+  $equipments = NULL;
+  //anai_dbg($reports, '$reports');
+
+  // Conditional for LotId = ANY:
+  if ($lot_id === 'ANY') {
+    $options = $reports['LotType'];
+    if (!empty($options)) {
+      $options = array_merge(array('ANY' => t('All types')), $options);
+    }
+    if (!empty($options)) {
+      if (!isset($form_state['storage']['ajax']['LotType'])) {
+	$form_state['storage']['ajax']['LotType'] = key($options);
+      }
+      $form['ajax']['LotType'] =
+	array('#type' => 'select',
+	      '#title' => t('Lot type'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['LotType'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    }
+    $options = $reports['LotClass'];
+    if (!empty($options)) {
+      $options = array_merge(array('ANY' => t('All classifications')), $options);
+    }
+    if (!empty($options)) {
+      if (!isset($form_state['storage']['ajax']['LotClass'])) {
+	$form_state['storage']['ajax']['LotClass'] = key($options);
+      }
+      $form['ajax']['LotClass'] =
+	array('#type' => 'select',
+	      '#title' => t('Lot classification'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['LotClass'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    }
+  }
+  if (isset($form_state['storage']['ajax']['LotType'])) {
+    $lot_type = $form_state['storage']['ajax']['LotType'];
+  } else {
+    $lot_type = 'ANY';
+  }
+  if (isset($form_state['storage']['ajax']['LotClass'])) {
+    $lot_class = $form_state['storage']['ajax']['LotClass'];
+  } else {
+    $lot_class = 'ANY';
+  }
+
+  $options = array();
+  foreach ($reports['Reports'] as $category => $value) {
+    $options[$category] = $category;
+  }
+
+  // Layout Category selection
+  if (isset($form_state['storage']['ajax']['Category']) and
+      !in_array($form_state['storage']['ajax']['Category'], array_keys($options))) {
+    unset($form_state['storage']['ajax']['Category']);
+  }
+  if (!isset($form_state['storage']['ajax']['Category'])) {
+    $form_state['storage']['ajax']['Category'] = key($options);
+  }
+  $form['ajax']['Category'] =
+    array('#type' => 'radios',
+	  '#title' => t('Category'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Category'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  $options = $reports['Reports'][$form_state['storage']['ajax']['Category']];
+
+  // Layout Report selection
+  if (isset($form_state['storage']['ajax']['ReportType']) and
+      !in_array($form_state['storage']['ajax']['ReportType'], array_keys($options))) {
+    unset($form_state['storage']['ajax']['ReportType']);
+  }
+  if (!isset($form_state['storage']['ajax']['ReportType'])) {
+    $form_state['storage']['ajax']['ReportType'] = key($options);
+  }
+  $form['ajax']['ReportType'] =
+    array('#type' => 'radios',
+	  '#title' => t('ReportType'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['ReportType'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Conditional for Category = Permit:
+  if ($form_state['storage']['ajax']['Category'] === 'Permit') {
+    $options = chpreport_get_permit_classes();
+    $options['ANY'] = t('All classes');
+    if (!in_array($form_state['storage']['ajax']['PermitClass'], array_keys($options))) {
+      unset($form_state['storage']['ajax']['PermitClass']);
+    }
+    if (!isset($form_state['storage']['ajax']['PermitClass'])) {
+      $form_state['storage']['ajax']['PermitClass'] = 'ANY';
+    }
+    $form['ajax']['PermitClass'] =
+      array('#type' => 'select',
+	    '#title' => t('Permit class'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['PermitClass'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  // Conditional for Category = Validation:
+  if ($form_state['storage']['ajax']['Category'] === 'Validation') {
+    // Group selector
+    $options = array();
+    foreach (chpperm_retrieve_groups($user->uid, $company_id, $property_id) as $key => $values) {
+      if ($client_id !== 'ANY' and $key !== $client_id) {
+	continue;
+      }
+      foreach ($values as $group_id => $group) {
+	if ($group['data']['Single']) {
+	  continue;
+	}
+	$options[$group_id] = decode_entities($group['data']['Alias']);
+      }
+    }
+    $options['ANY'] = t('All group accounts');
+    if (1 == count($options)) {
+      $form['ajax']['done'] =
+	array('#value' => '<p>'.
+	      t('No group accounts are available for selected client(s).').'<br>'.
+	      t('Not possible to create report.').'<p>');
+      return $form;
+    }
+    if (!in_array($form_state['storage']['ajax']['GroupId'], array_keys($options))) {
+      unset($form_state['storage']['ajax']['GroupId']);
+    }
+    if (!isset($form_state['storage']['ajax']['GroupId'])) {
+      $form_state['storage']['ajax']['GroupId'] = 'ANY';
+    }
+    $form['ajax']['GroupId'] =
+      array('#type' => 'select',
+	    '#title' => t('Group account'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['GroupId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    $group_id = $form_state['storage']['ajax']['GroupId'];
+
+    // Visit type selector
+    if ($group_id === 'ANY') {
+      $options = array();
+      $options['Commercial'] = t('Commercial');
+      $options['Residential'] = t('Residential');
+      $options['ANY'] = t('All visit types');
+      if (!isset($form_state['storage']['ajax']['VisitType'])) {
+	$form_state['storage']['ajax']['VisitType'] = 'ANY';
+      }
+      $form['ajax']['VisitType'] =
+	array('#type' => 'select',
+	      '#title' => t('Visit type'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['VisitType'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    } else {
+      $groupdef = chdbperm_get_groupdef($company_id, $group_id);
+      if ($groupdef['ValCommercial'] and $groupdef['ValResidential']) {
+	$options = array();
+	$options['Commercial'] = t('Commercial');
+	$options['Residential'] = t('Residential');
+	$options['ANY'] = t('All visit types');
+	if (!isset($form_state['storage']['ajax']['VisitType'])) {
+	  $form_state['storage']['ajax']['VisitType'] = 'ANY';
+	}
+	$form['ajax']['VisitType'] =
+	  array('#type' => 'select',
+		'#title' => t('Visit type'),
+		'#options' => $options,
+		'#default_value' => $form_state['storage']['ajax']['VisitType'],
+		'#ahah' => array('event' => 'change',
+				 'path' => ahah_helper_path(array('ajax')),
+				 'wrapper' => 'ajax-wrapper'));
+      }
+    }
+    // Length selector
+    $options = array();
+    foreach (chpperm_validation_lengths() as $key => $value) {
+      $options[$key] = $value['name'];
+    }
+    $options['ANY'] = t('All lengths');
+    if (!isset($form_state['storage']['ajax']['Length'])) {
+      $form_state['storage']['ajax']['Length'] = 'ANY';
+    }
+    $form['ajax']['Length'] =
+      array('#type' => 'select',
+	    '#title' => t('Length'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Length'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    // Benefit selector
+    $options = array();
+    foreach (chpperm_validation_benefits() as $key => $value) {
+      $options[$key] = $value['name'];
+    }
+    $options['ANY'] = t('All benefits');
+    if (!isset($form_state['storage']['ajax']['Benefit'])) {
+      $form_state['storage']['ajax']['Benefit'] = 'ANY';
+    }
+    $form['ajax']['Benefit'] =
+      array('#type' => 'select',
+	    '#title' => t('Benefit'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Benefit'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  // Conditional for Category = Occupancy:
+  if ($form_state['storage']['ajax']['Category'] === 'Occupancy') {
+    if ($form_state['storage']['ajax']['ReportType'] === 'OccuGroup') {
+      $options = array();
+      foreach (chpperm_retrieve_groups($user->uid, $company_id, $property_id) as $key => $values) {
+	if ($client_id !== 'ANY' and $key !== $client_id) {
+	  continue;
+	}
+	foreach ($values as $group_id => $group) {
+	  if ($group['data']['Single']) {
+	    continue;
+	  }
+	  $options[$group_id] = decode_entities($group['data']['Alias']);
+	}
+      }
+      $options['ANY'] = t('All group accounts');
+      if (1 == count($options)) {
+	$form['ajax']['done'] =
+	  array('#value' => '<p>'.
+		t('No group accounts are available for selected client(s).').'<br>'.
+		t('Not possible to create report.').'<p>');
+	return $form;
+      }
+      if (!in_array($form_state['storage']['ajax']['GroupId'], array_keys($options))) {
+	unset($form_state['storage']['ajax']['GroupId']);
+      }
+      if (!isset($form_state['storage']['ajax']['GroupId'])) {
+	$form_state['storage']['ajax']['GroupId'] = 'ANY';
+      }
+      $form['ajax']['GroupId'] =
+	array('#type' => 'select',
+	      '#title' => t('Group account'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['GroupId'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    } elseif ($form_state['storage']['ajax']['ReportType'] === 'OccuMember') {
+      $options = array();
+      foreach (chpperm_retrieve_groups($user->uid, $company_id, $property_id) as $key => $values) {
+	if ($client_id !== 'ANY' and $key !== $client_id) {
+	  continue;
+	}
+	foreach ($values as $group_id => $group) {
+	  if (!$group['data']['Single']) {
+	    continue;
+	  }
+	  $options[$group_id] = decode_entities($group['data']['Alias']);
+	}
+      }
+      $options['ANY'] = t('All individual accounts');
+      if (1 == count($options)) {
+	$form['ajax']['done'] =
+	  array('#value' => '<p>'.
+		t('No individual accounts are available for selected client(s).').'<br>'.
+		t('Not possible to create report.').'<p>');
+	return $form;
+      }
+      if (!in_array($form_state['storage']['ajax']['GroupId'], array_keys($options))) {
+	unset($form_state['storage']['ajax']['GroupId']);
+      }
+      if (!isset($form_state['storage']['ajax']['GroupId'])) {
+	$form_state['storage']['ajax']['GroupId'] = 'ANY';
+      }
+      $form['ajax']['GroupId'] =
+	array('#type' => 'select',
+	      '#title' => t('Individual account'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['GroupId'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    } elseif ($form_state['storage']['ajax']['ReportType'] === 'OccuPublic') {
+    } elseif ($form_state['storage']['ajax']['ReportType'] === 'OccuCompliancy') {
+      $options = array();
+      $options['Compliant'] = chpreport_get_compliancy_name('Compliant');
+      $options['NonCompliant'] = chpreport_get_compliancy_name('NonCompliant');
+      $options['ANY'] = t('All registrations');
+      if (!in_array($form_state['storage']['ajax']['Compliancy'], array_keys($options))) {
+	unset($form_state['storage']['ajax']['Compliancy']);
+      }
+      if (!isset($form_state['storage']['ajax']['Compliancy'])) {
+	$form_state['storage']['ajax']['Compliancy'] = 'ANY';
+      }
+      $form['ajax']['Compliancy'] =
+	array('#type' => 'select',
+	      '#title' => t('Compliancy'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['Compliancy'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    }
+  }
+
+  // Conditional for Category = Meter:
+  if ($form_state['storage']['ajax']['Category'] === 'Meter') {
+    $options = array();
+    foreach (chdbccpark_get_systems($company_id, $property_id, $lot_id,
+				    $lot_type, $lot_class) as $meter) {
+      $options[$meter['AgentId']] = decode_entities($meter['Alias']);
+    }
+    $options['ANY'] = t('All meters');
+    if (1 == count($options)) {
+      $form['ajax']['done'] =
+	array('#value' => '<p>'.
+	      t('No meters are deployed on selected lot(s).').'<br>'.
+	      t('Not possible to create report.').'<p>');
+      return $form;
+    }
+    if (!in_array($form_state['storage']['ajax']['AgentId'], array_keys($options))) {
+      unset($form_state['storage']['ajax']['AgentId']);
+    }
+    if (!isset($form_state['storage']['ajax']['AgentId'])) {
+      $form_state['storage']['ajax']['AgentId'] = key($options);
+    }
+    $form['ajax']['AgentId'] =
+      array('#type' => 'select',
+	    '#title' => t('Meter'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['AgentId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    // Tore 131225: Added
+    if ($form_state['storage']['ajax']['ReportType'] === 'MeterMerchantcode' and
+	$form_state['storage']['ajax']['AgentId'] !== 'ANY') {
+      $options = array();
+      $merchantcodemeter =
+	chdbccpark_get_merchantcodemeter($form_state['storage']['ajax']['AgentId']);
+      if (!empty($merchantcodemeter)) {
+	foreach (chpperm_retrieve_containers($user->uid, $company_id) as
+		 $container_id => $container) {
+	  $merchantcodes =
+	    chdbccpark_retrieve_container_merchantcodes
+	    ($user->uid, $company_id, $container_id);
+	  if (empty($merchantcodes)) {
+	    continue;
+	  }
+	  $merchantcode = current($merchantcodes);
+	  if ($merchantcodemeter['TypeId'] !== $merchantcode['data']['TypeId']) {
+	    continue;
+	  }
+	  foreach ($merchantcodes as $merchantcode => $value) {
+	    $options[$merchantcode] = $merchantcode;
+	  }
+	}
+      }
+      $options['ANY'] = t('All merchant codes');
+      if (!in_array($form_state['storage']['ajax']['MerchantCode'], array_keys($options))) {
+	unset($form_state['storage']['ajax']['MerchantCode']);
+      }
+      if (!isset($form_state['storage']['ajax']['MerchantCode'])) {
+	$form_state['storage']['ajax']['MerchantCode'] = key($options);
+      }
+      $form['ajax']['MerchantCode'] =
+	array('#type' => 'select',
+	      '#title' => t('Merchant Code'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['MerchantCode'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    }
+  }
+
+  // Conditional for Category = Lane:
+  if ($form_state['storage']['ajax']['Category'] === 'Lane') {
+    $options = array();
+    if ((in_array('Admin', array_values($account->roles)) and $account->status) or
+	$account->uid == 1) {
+      foreach (chdbprop_cc_get_lanes_admin($company_id, $property_id, $lot_id,
+					   $lot_type, $lot_class) as $lane) {
+	$options[$lane['LaneId']] = decode_entities($lane['Alias']);
+      }
+    } else {
+      foreach (chdbprop_cc_get_lanes($company_id, $property_id, $lot_id,
+				     $lot_type, $lot_class) as $lane) {
+	$options[$lane['LaneId']] = decode_entities($lane['Alias']);
+      }
+    }
+    $options['ANY'] = t('All lanes');
+    if (1 == count($options)) {
+      $form['ajax']['done'] =
+	array('#value' => '<p>'.
+	      t('No lanes are configured on selected lot(s).').'<br>'.
+	      t('Not possible to create report.').'<p>');
+      return $form;
+    }
+    if (isset($form_state['storage']['ajax']['LaneId']) and
+	!in_array($form_state['storage']['ajax']['LaneId'], array_keys($options))) {
+      unset($form_state['storage']['ajax']['LaneId']);
+    }
+    if (!isset($form_state['storage']['ajax']['LaneId'])) {
+      $form_state['storage']['ajax']['LaneId'] = key($options);
+    }
+    $form['ajax']['LaneId'] =
+      array('#type' => 'select',
+    	    '#title' => t('Lane'),
+    	    '#options' => $options,
+    	    '#default_value' => $form_state['storage']['ajax']['LaneId'],
+    	    '#ahah' => array('event' => 'change',
+    			     'path' => ahah_helper_path(array('ajax')),
+    			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  /* if (user_access('anai chp access permit report') and */
+  /*     ($profile['LongPolicy'] or */
+  /*      $profile['ShortPolicy'] or */
+  /*      $profile['LongShortPolicy'])) { */
+  /*   $options['Permit'] = chpreport_type_name('Permit'); */
+  /* } */
+
+  /* if (user_access('anai chp access permit revenue report') and */
+  /*     ($profile['LongPolicy'] or */
+  /*      $profile['ShortPolicy'] or */
+  /*      $profile['LongShortPolicy'])) { */
+  /*   $options['PermitRev'] = 'Permit revenue'; */
+  /* } */
+
+  /* if (user_access('anai chp access whitelist report') and */
+  /*     ($profile['LongPolicy'] or */
+  /*      $profile['ShortPolicy'] or */
+  /*      $profile['LongShortPolicy'])) { */
+  /*   $options['WhiteList'] = 'Whitelist'; */
+  /* } */
+
+  /* if (user_access('anai chp access permit container report') and */
+  /*     ($profile['LongPolicy'] or */
+  /*      $profile['ShortPolicy'] or */
+  /*      $profile['LongShortPolicy'])) { */
+  /*   $containers = chdbperm_get_contprop_containers($company_id, $property_id); */
+
+  /*   if (sizeof($containers) > 0) { */
+  /*     if (chpprop_property_allow_regular_permit($profile)) { */
+  /* 	$options['Group_Regular'] = t('Regular permits only'); */
+  /*     } */
+  /*   } */
+
+  /*   foreach ($containers as $container) { */
+  /*     $container_id = $container['ContainerId']; */
+  /*     $conttypes = chdbperm_get_conttypes($company_id, $container_id); */
+
+  /*     foreach ($conttypes as $conttype) { */
+  /* 	$options['Group_'.$container_id.'__'.$conttype['RateId']] = */
+  /* 	  $conttype['Alias'].t(' permits only'); */
+  /*     } */
+  /*   } */
+  /* } */
+
+  /* if (user_access('anai chp access tickets report') and */
+  /*     $profile['EnforcementPolicy'] and */
+  /*     $profile['Ticketing']) { */
+  /*   $options['Tickets'] = 'Tickets'; */
+  /* } */
+
+  /* if (user_access('anai chp access ticket revenue report') and */
+  /*     $profile['EnforcementPolicy'] and */
+  /*     $profile['Ticketing']) { */
+  /*   $options['TicketsRev'] = 'Ticket revenue'; */
+  /* } */
+
+  /* if (user_access('anai chp access boots report') and */
+  /*     $profile['EnforcementPolicy'] and */
+  /*     $profile['Booting']) { */
+  /*   $options['Boots'] = 'Boots'; */
+  /* } */
+
+  /* if (user_access('anai chp access complaints report')) { */
+  /*   $options['Complaints'] = COMPLAINT_NAME.'s'; */
+  /* } */
+
+  // Create report period options
+  $options = array();
+  $options['Last24'] = 'Last 24 hours';
+  $options['Cmonth'] = 'Current month';
+  $options['Pmonth'] = 'Previous month';
+  $options['Range'] = 'Select range';
+
+  // Layout report period options
+  if (!isset($form_state['storage']['ajax']['Timerange'])) {
+    $form_state['storage']['ajax']['Timerange'] = key($options);
+  }
+  $form['ajax']['Timerange'] =
+    array('#type' => 'radios',
+	  '#title' => t('Select time of report'),
+	  '#required' => FALSE,
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Timerange'],
+	  //'#after_build' => array('chpreport_create_form_after_build'),
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ($form_state['storage']['ajax']['Timerange'] === 'Range') {
+    //jquery_ui_add('ui.datepicker');
+    drupal_add_js
+      ('(function ($) {
+           Drupal.behaviors.ANAIchpreports=function(context){
+      	     $("#edit-ajax-StartTime:not(.StartTime-processed)",
+               context).addClass("StartTime-processed")
+               .AnyTime_picker({format:"%Y-%m-%d 00:00:00",hideInput:false,
+                                placement:"popup",askSecond:false,
+                                labelTitle:"Start Date"});
+       	     $("#edit-ajax-StopTime:not(.StopTime-processed)",
+               context).addClass("StopTime-processed")
+               .AnyTime_picker({format:"%Y-%m-%d 23:59:59",hideInput:false,
+                                placement:"popup",askSecond:false,
+                                labelTitle:"End Date"});
+ 	     //$("#edit-ajax-StartTime").datepicker({dateFormat:"yy-mm-dd 00:00:00"});
+  	     //$("#edit-ajax-StopTime").datepicker({dateFormat:"yy-mm-dd 23:59:59"});
+           };
+         }(jQuery));', 'inline');
+
+    if (!isset($form_state['storage']['ajax']['StartTime'])) {
+      $now = chpuser_datetime_utc_to_usertimezone('now');
+      $now->modify('-1 day');
+      $form_state['storage']['ajax']['StartTime'] = $now->format("Y-m-d H:i:s");
+    }
+    $form['ajax']['StartTime'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Start time'),
+	    '#maxlength' => 40,
+	    '#default_value' => $form_state['storage']['ajax']['StartTime']);
+
+    if (!isset($form_state['storage']['ajax']['StopTime'])) {
+      $now = chpuser_datetime_utc_to_usertimezone('now');
+      $form_state['storage']['ajax']['StopTime'] = $now->format("Y-m-d H:i:s");
+    }
+    $form['ajax']['StopTime'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Stop time'),
+	    '#maxlength' => 40,
+	    '#default_value' => $form_state['storage']['ajax']['StopTime']);
+  }
+
+  // Layout resultign report links
+  $form['ajax']['result'] =
+    array('#type' => 'fieldset',
+  	  '#title' => 'Created report');
+
+  if (empty($form_state['storage']['Links'])) {
+    $form['ajax']['result']['empty'] = array('#value' => t('Empty.'));
+  } elseif (isset($form_state['storage']['Links'])) {
+    foreach ($form_state['storage']['Links'] as $place => $link) {
+      $form['ajax']['result'][$place] = array('#value' => $link);
+    }
+    unset($form_state['storage']['Links']);
+  }
+
+  $form['ajax']['submit'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/create.png',
+  	  '#validate' => array('chpreport_create_form_validate_save'),
+  	  '#submit' => array('chpreport_create_form_submit_save'),
+  	  );
+  return $form;
+}
+
+function chpreport_create_form_validate_save($form, &$form_state) {
+}
+
+function chpreport_create_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpreport_create_form_submit_save($form, &$form_state) {
+  global $user;
+  $report = chdbstats_get_last_report($user->uid);
+  if (!empty($report)) {
+    chdbstats_update_report_inactive($user->uid);
+  }
+
+  if (isset($form_state['values']['ajax']['StartTime'])) {
+    $start_time = $form_state['values']['ajax']['StartTime'];
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Last24') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->modify('-1 day');
+    $start_time = $now->format("Y-m-d H:i:s");
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Cmonth') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $start_time = $now->format('Y-m').'-01 00:00:00';
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Pmonth') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->SetTime('00', '00', '00');
+    $now->SetDate($now->format('Y'), $now->format('m'), '01');
+    $now->modify('-1 month');
+    $start_time = $now->format("Y-m-d H:i:s");
+  } else {
+    $start_time = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['StopTime'])) {
+    $stop_time = $form_state['values']['ajax']['StopTime'];
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Last24') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $stop_time = $now->format("Y-m-d H:i:s");
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Cmonth') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $stop_time = $now->format("Y-m-d H:i:s");
+  } elseif ($form_state['values']['ajax']['Timerange'] === 'Pmonth') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->SetTime('23', '59', '59');
+    $now->SetDate($now->format('Y'), $now->format('m'), '01');
+    $now->modify('-1 day');
+    $stop_time = $now->format("Y-m-d H:i:s");
+  } else {
+    $stop_time = NULL;
+  }
+
+  if (chdbstats_insert_report
+      ($user->uid,
+       isset($form_state['values']['ajax']['CompanyId']) ?
+       $form_state['values']['ajax']['CompanyId'] : 'ANY',
+       isset($form_state['values']['ajax']['RegionId']) ?
+       $form_state['values']['ajax']['RegionId'] : 'ANY',
+       isset($form_state['values']['ajax']['ClientId']) ?
+       $form_state['values']['ajax']['ClientId'] : 'ANY',
+       isset($form_state['values']['ajax']['PropertyId']) ?
+       $form_state['values']['ajax']['PropertyId'] : 'ANY',
+       isset($form_state['values']['ajax']['LotId']) ?
+       $form_state['values']['ajax']['LotId'] : 'ANY',
+       isset($form_state['values']['ajax']['LotType']) ?
+       $form_state['values']['ajax']['LotType'] : 'ANY',
+       isset($form_state['values']['ajax']['LotClass']) ?
+       $form_state['values']['ajax']['LotClass'] : 'ANY',
+       $form_state['values']['ajax']['Category'],
+       $form_state['values']['ajax']['ReportType'],
+       isset($form_state['values']['ajax']['PermitClass']) ?
+       $form_state['values']['ajax']['PermitClass'] : 'ANY',
+       isset($form_state['values']['ajax']['Compliancy']) ?
+       $form_state['values']['ajax']['Compliancy'] : 'ANY',
+       isset($form_state['values']['ajax']['GroupId']) ?
+       $form_state['values']['ajax']['GroupId'] : 'ANY',
+       isset($form_state['values']['ajax']['AgentId']) ?
+       $form_state['values']['ajax']['AgentId'] : 'ANY',
+       isset($form_state['values']['ajax']['LaneId']) ?
+       $form_state['values']['ajax']['LaneId'] : 'ANY',
+       isset($form_state['values']['ajax']['VisitType']) ?
+       $form_state['values']['ajax']['VisitType'] : 'ANY',
+       isset($form_state['values']['ajax']['Length']) ?
+       $form_state['values']['ajax']['Length'] : 'ANY',
+       isset($form_state['values']['ajax']['Benefit']) ?
+       $form_state['values']['ajax']['Benefit'] : 'ANY',
+       isset($form_state['values']['ajax']['MerchantCode']) ?
+       $form_state['values']['ajax']['MerchantCode'] : 'ANY',
+       $start_time,
+       $stop_time)) {
+    drupal_set_message("Couldn\'t insert report", 'error');
+    return;
+  }
+
+  // Browser report
+  $path = 'chpreport';
+  $png = drupal_get_path('module', 'anai_chpreports').'/browser.png';
+  $img = '<img src="'.$png.'">';
+  $link = l($img, $path, array('attributes' => array('target' => '_blank'),
+			       'html' => TRUE));
+  $form_state['storage']['Links']['Browser'] = $link;
+
+  // CSV file report
+  $path = 'chpreportcsv/';
+  $png = drupal_get_path('module', 'anai_chpreports').'/csv.png';
+  $img = '<img src="'.$png.'">';
+  $link = l($img, $path, array('attributes' => array('target' => '_blank'),
+			       'html' => TRUE));
+  $form_state['storage']['Links']['csv'] = $link;
+}
+
+
+
+/**********
+ ********** Browser report
+ ********** Address: chpreportbrowser
+ ********** Access:  'anai chp create reports'
+ *********/
+
+
+
+function chpreport_browser_form() {
+  global $user;
+  $html = '';
+  $report = chdbstats_get_last_report($user->uid);
+  if (empty($report)) {
+    // This URL is used without a valid report created
+    $title = t('There is no permit to display');
+    $html .= '<center><h1>'.$title.'</h1></center><p>';
+    $location = t('Use Reports app to create the report you want to view');
+    $html .= '<center><h2>'.$location.'</h2></center><p>';
+    return $html;
+  } else {
+    $html .= chpreport_create_header($report);
+  }
+
+  $company_id = $report['CompanyId'];
+  $region_id = $report['RegionId'];
+  $client_id = $report['ClientId'];
+  $property_id = $report['PropertyId'];
+  $lot_id = $report['LotId'];
+  $start_time = $report['StartTime'];
+  $stop_time = $report['StopTime'];
+  $lot_type = $report['LotType'];
+  $lot_class = $report['LotClass'];
+  $permit_class = $report['PermitClass'];
+  $compliancy = $report['Compliancy'];
+  $group_id = $report['GroupId'];
+  $agent_id = $report['AgentId'];
+  $lane_id = $report['LaneId'];
+  $merchant_code = $report['MerchantCode']; // Tore 131225: Added
+
+  // Category: Permit
+  if ($report['Category'] === 'Permit') {
+    switch ($report['ReportType']) {
+    case 'PermitActDeact':
+      $html .= chpreport_activation_deactivation('Browser',
+						 $company_id, $property_id, $lot_id,
+						 $start_time, $stop_time,
+						 $lot_type, $lot_class,
+						 $permit_class);
+      break;
+    case 'PermitContainerUsage':
+      $html .= chpreport_container_usage('Browser',
+					 $company_id, $property_id, $lot_id,
+					 $start_time, $stop_time,
+					 $lot_type, $lot_class,
+					 $permit_class);
+      break;
+    }
+  }
+
+  // Category: Occupancy
+  if ($report['Category'] === 'Occupancy') {
+    switch ($report['ReportType']) {
+    case 'OccuGroup':
+      $html .= chpreport_occu_group('Browser',
+				    $company_id, $property_id, $lot_id, $group_id,
+				    $start_time, $stop_time,
+				    $lot_type, $lot_class,
+				    'Group', 'Compliant');
+      break;
+    case 'OccuMember':
+      $html .= chpreport_occu_group('Browser',
+				    $company_id, $property_id, $lot_id, $group_id,
+				    $start_time, $stop_time,
+				    $lot_type, $lot_class,
+				    'Member', 'Compliant');
+      break;
+    case 'OccuPublic':
+      $html .= chpreport_occu_random('Browser',
+      				     $company_id, $property_id, $lot_id,
+      				     $start_time, $stop_time,
+      				     $lot_type, $lot_class,
+      				     array('Transient','Meter'),
+				     'Compliant');
+      break;
+    case 'OccuCompliancy':
+      $html .= chpreport_occu_compliancy('Browser',
+					 $company_id, $property_id, $lot_id,
+					 $start_time, $stop_time,
+					 $lot_type, $lot_class,
+					 'ANY', $compliancy);
+      break;
+    }
+  }
+
+  // Category: Meter
+  if ($report['Category'] === 'Meter') {
+    switch ($report['ReportType']) {
+    case 'MeterCreditCard':
+      $html .= chpreport_meter_creditcard('Browser',
+					  $company_id, $property_id, $lot_id,
+					  $start_time, $stop_time,
+					  $lot_type, $lot_class,
+					  $agent_id);
+      break;
+    case 'MeterCash':
+      $html .= chpreport_meter_cash('Browser',
+				    $company_id, $property_id, $lot_id,
+				    $start_time, $stop_time,
+				    $lot_type, $lot_class,
+				    $agent_id);
+      break;
+    case 'MeterRevenue':
+      $html .= chpreport_meter_revenue('Browser',
+				       $company_id, $property_id, $lot_id,
+				       $start_time, $stop_time,
+				       $lot_type, $lot_class,
+				       $agent_id);
+      break;
+    case 'MeterMerchantcode': // Tore 131225: Added
+      $html .= chpreport_meter_merchantcode('Browser',
+					    $company_id, $property_id, $lot_id,
+					    $start_time, $stop_time,
+					    $lot_type, $lot_class,
+					    $agent_id,
+					    $merchant_code);
+      break;
+    }
+  }
+
+  // Category: Lane
+  if ($report['Category'] === 'Lane') {
+    switch ($report['ReportType']) {
+    case 'LaneCount':
+      $html .= chpreport_lane_lanecount('Browser',
+					$company_id, $property_id, $lot_id,
+					$start_time, $stop_time,
+					$lot_type, $lot_class,
+					$lane_id);
+      break;
+    }
+  }
+
+  return $html;
+}
+
+
+
+/**********
+ ********** CSV report
+ ********** Address: chpreportcsv
+ ********** Access:  'anai chp create reports'
+ *********/
+
+
+
+function chpreport_csv_form() {
+  global $user;
+  $report = chdbstats_get_last_report($user->uid);
+  if (empty($report)) {
+    return;
+  }
+
+  $company_id = $report['CompanyId'];
+  $region_id = $report['RegionId'];
+  $client_id = $report['ClientId'];
+  $property_id = $report['PropertyId'];
+  $lot_id = $report['LotId'];
+  $start_time = $report['StartTime'];
+  $stop_time = $report['StopTime'];
+  $lot_type = $report['LotType'];
+  $lot_class = $report['LotClass'];
+  $permit_class = $report['PermitClass'];
+  $compliancy = $report['Compliancy'];
+  $group_id = $report['GroupId'];
+  $agent_id = $report['AgentId'];
+  $merchant_code = $report['MerchantCode']; // Tore 131225: Added
+
+  // Category: Permit
+  if ($report['Category'] === 'Permit') {
+    switch ($report['ReportType']) {
+    case 'PermitActDeact':
+      chpreport_activation_deactivation('CSV',
+					$company_id, $property_id, $lot_id,
+					$start_time, $stop_time,
+					$lot_type, $lot_class,
+					$permit_class);
+      break;
+    case 'PermitContainerUsage':
+      chpreport_container_usage('CSV',
+				$company_id, $property_id, $lot_id,
+				$start_time, $stop_time,
+				$lot_type, $lot_class,
+				$permit_class);
+      break;
+    }
+  }
+
+  // Category: Occupancy
+  if ($report['Category'] === 'Occupancy') {
+    switch ($report['ReportType']) {
+    case 'OccuGroup':
+      chpreport_occu_group('CSV',
+			   $company_id, $property_id, $lot_id, $group_id,
+			   $start_time, $stop_time,
+			   $lot_type, $lot_class,
+			   'Group', 'Compliant');
+      break;
+    case 'OccuMember':
+      chpreport_occu_group('CSV',
+			   $company_id, $property_id, $lot_id, $group_id,
+			   $start_time, $stop_time,
+			   $lot_type, $lot_class,
+			   'Member', 'Compliant');
+      break;
+    case 'OccuPublic':
+      chpreport_occu_random('Browser',
+			    $company_id, $property_id, $lot_id,
+			    $start_time, $stop_time,
+			    $lot_type, $lot_class,
+			    array('Transient','Meter'),
+			    'Compliant');
+      break;
+    case 'OccuCompliancy':
+      chpreport_occu_compliancy('CSV',
+				$company_id, $property_id, $lot_id,
+				$start_time, $stop_time,
+				$lot_type, $lot_class,
+				$compliancy);
+      break;
+    }
+  }
+
+  // Category: Meter
+  if ($report['Category'] === 'Meter') {
+    switch ($report['ReportType']) {
+    case 'MeterCreditCard':
+      chpreport_meter_creditcard('CSV',
+				 $company_id, $property_id, $lot_id,
+				 $start_time, $stop_time,
+				 $lot_type, $lot_class,
+				 $agent_id);
+      break;
+    case 'MeterCash':
+      chpreport_meter_cash('CSV',
+			   $company_id, $property_id, $lot_id,
+			   $start_time, $stop_time,
+			   $lot_type, $lot_class,
+			   $agent_id);
+      break;
+    case 'MeterRevenue':
+      chpreport_meter_revenue('CSV',
+			      $company_id, $property_id, $lot_id,
+			      $start_time, $stop_time,
+			      $lot_type, $lot_class,
+			      $agent_id);
+      break;
+    case 'MeterMerchantcode': // Tore 131225: Added
+      chpreport_meter_merchantcode('CSV',
+				   $company_id, $property_id, $lot_id,
+				   $start_time, $stop_time,
+				   $lot_type, $lot_class,
+				   $agent_id,
+				   $merchant_code);
+      break;
+    }
+  }
+
+  return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function chpreport_create_header_old($company_id, $property_id, $lot_id,
+				     $report, $start_time, $stop_time) {
+  global $user;
+  if ($report == 'PermitActDeact') {
+    $title = chpreport_type_name('PermitActDeact');
+  } elseif ($report == 'PermitContainerUsage') {
+    $title = chpreport_type_name('PermitContainerUsage');
+  } elseif ($report == 'OccuCompliant') {
+    $title = chpreport_type_name('OccuCompliant');
+  } elseif ($report == 'OccuNonCompliant') {
+    $title = chpreport_type_name('OccuNonCompliant');
+  } elseif ($report == 'OccuBlack') {
+    $title = chpreport_type_name('OccuBlack');
+  } elseif ($report == 'MeterCreditCard') {
+    $title = chpreport_type_name('MeterCreditCard');
+  } elseif ($report == 'MeterCash') {
+    $title = chpreport_type_name('MeterCash');
+  } elseif ($report == 'MeterRevenue') {
+    $title = chpreport_type_name('MeterRevenue');
+  } elseif (strpos($report, 'Group_') === 0) {
+    $tag = substr($report, strlen('Group_'));
+    if ($tag === 'Regular') {
+      $title = 'Regular transient permits';
+    } else {
+      $container_id = substr($tag, 0, strpos($tag, '__'));
+      $type_id = substr($tag, strlen($container_id) + strlen('__'));
+      $conttype = chdbperm_get_rate($company_id, $container_id, $type_id);
+      $title = decode_entities($conttype['Alias']).' permits only';
+    }
+  } elseif ($report == 'Tickets') {
+    $title = 'Tickets report';
+  } elseif ($report == 'Complaints') {
+    $title = COMPLAINT_NAME.'s report';
+  } elseif ($report == 'Boots') {
+    $title = 'Boots report';
+  } elseif ($report == 'TicketsRev') {
+    $title = 'Ticket revenue report';
+  } else {
+    $title = 'Unknown report';
+  }
+  $html .= '<center><h1>'.$title.'</h1></center><p>';
+
+  if ($company_id === 'ANY') {
+    $location = t('All companies').'<br>';
+  } else {
+    $company = chdbprop_get_company($company_id);
+    $location = decode_entities($company['Alias']).'<br>';
+  }
+
+  if ($property_id === 'ANY') {
+    $location .= t('All properties').'<br>';
+  } else {
+    $property = chdbprop_get_property($property_id);
+    $location .=
+      decode_entities($property['Alias']).', '.
+      decode_entities($property['Street']).', '.
+      decode_entities($property['City']);
+  }
+  $html .= '<center><h2>'.$location.'</h2></center><p>';
+
+  if ($lot_id === 'ANY') {
+    $location = t('All lots');
+  } else {
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $location = decode_entities($policy['Alias']);
+  }
+  $html .= '<center><h3>'.$location.'</h3></center><p>';
+
+  $html .= '<table><tr>';
+  $html .= '<td align="left" class="noborder">';
+  $html .= 'Start date: <b>'.$start_time.'</b><br>End date: <b>'.$stop_time.'</b>';
+  $html .= '</td><td align="right" class="noborder">';
+  $html .= 'Report created by: <b>'.$user->name.'</b><br>';
+  $html .= 'on <b><script language="JavaScript">window.document.write(new Date())</script></b>';
+  $html .= '</td></tr></table>';
+  return $html;
+}
+
+
+function chpreport_permit($company_id, $property_id, $lot_id,
+                          $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  $profile = array();
+
+  if (strcmp($lot_id, 'All')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $profile_id = $policy['ProfileId'];
+    $profile = chdbprop_get_profile($profile_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+                chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+                                             $stop->format("Y-m-d H:i:s"),
+                                             $company_id, $property_id,
+                                             $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+                chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+                                            $stop->format("Y-m-d H:i:s"),
+                                            $company_id, $property_id,
+                                            $filter_lot, $lot_id));
+
+  if (!empty($profile) and $profile['LongPolicy']) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Tag</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Valid</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+        $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+        $expiry_str = $expiry->format("M j,y H:i");
+      } else {
+        $expiry_str = '';
+      }
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.($entry['Active'] ? 'Yes' : 'No').'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  } elseif (!empty($profile) and $profile['ShortPolicy']) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Suite</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Valid</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Class</b></td>';
+    if (chpprop_property_allow_overnight_permit($profile)) {
+      $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+    }
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+        $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+        $expiry_str = $expiry->format("M j,y H:i");
+      } else {
+        $expiry_str = '';
+      }
+
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.($entry['Active'] ? 'Yes' : 'No').'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '<td align="center">'.chpperm_registration_name($entry['PermitClass'], FALSE).'</td>';
+      if (chpprop_property_allow_overnight_permit($profile)) {
+        $html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+      }
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  } elseif (empty($profile) or (!empty($profile) and $profile['LongShortPolicy'])) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Tag/Suite</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Valid</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Class</b></td>';
+    if (chpprop_property_allow_overnight_permit($profile)) {
+      $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+    }
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+        $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+        $expiry_str = $expiry->format("M j,y H:i");
+      } else {
+        $expiry_str = '';
+      }
+
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.($entry['Active'] ? 'Yes' : 'No').'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '<td align="center">'.chpperm_registration_name($entry['PermitClass'], FALSE).'</td>';
+      if (chpprop_property_allow_overnight_permit($profile)) {
+        $html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+      }
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  }
+  return $html;
+}
+
+function chpreport_permit_csv($company_id, $property_id, $lot_id,
+			      $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+  $entries = array();
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $profile_id = $policy['ProfileId'];
+    $profile = chdbprop_get_profile($profile_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Time', 'LPN', 'Tag/Suite', 'Valid', 'Expiry', 'Class', 'Overnight'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    if (!empty($entry['ExpiryTime'])) {
+      $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+      $expiry_str = $expiry->format("M j,y H:i");
+    } else {
+      $expiry_str = '';
+    }
+
+    fputcsv($output,
+	    array($created->format("M j,y H:i"),
+		  $entry['LPN'],
+		  $entry['PermitTag'],
+		  $entry['Active'] ? 'Yes' : 'No',
+		  $expiry_str,
+		  $entry['PermitClass'],
+		  $entry['Extended'] ? "Yes" : "No"));
+  }
+}
+
+function chpreport_permit_revenue($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id));
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Suite</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Class</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Amount</b></td>';
+  $html .= '</tr>';
+  $day_total = -1;
+  $grand_total = 0;
+  foreach ($entries as $entry) {
+    if ($entry['Cost'] == 0.0) {
+      continue;
+    }
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $day = $created->format("j");
+    if ($day_total == -1) {
+      $prev_day = $day;
+      $day_total = 0;
+    }
+    $day_total += $entry['Cost'];
+    $grand_total += $entry['Cost'];
+
+    if ($day != $prev_day) {
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $prev_day = $day;
+      $html .= '<td align="right" colspan="5" class="noborder"><b>Total:</b></td>';
+      $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $day_total).'</td>';
+      $html .= '</tr>';
+      $day_total = 0;
+    }
+
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="center">'.$entry['LPN'].'</td>';
+    $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+    $html .= '<td align="center">'.$entry['PermitClass'].'</td>';
+    if (!strcmp($entry['PermitClass'], 'Regular')) {
+      $html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+    } else {
+      $html .= '<td align="center"></td>';
+    }
+    $html .= '<td align="center">'.sprintf("%.02f", $entry['Cost']).'</td>';
+    $html .= '</tr>';
+  }
+  if ($day_total != -1) {
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="right" colspan="5" class="noborder"><b>Total:</b></td>';
+    $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $day_total).'</td>';
+    $html .= '</tr>';
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="right" colspan="5" class="noborder"><b>Grand total:</b></td>';
+    $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $grand_total).'</td>';
+    $html .= '</tr>';
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_permit_revenue_csv($company_id, $property_id, $lot_id,
+				      $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Time', 'LPN', 'Suite', 'Class', 'Overnight', 'Amount'));
+
+  foreach ($entries as $entry) {
+    if ($entry['Cost'] == 0.0) {
+      continue;
+    }
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+
+    fputcsv($output,
+	    array($created->format("M j,y H:i"),
+		  $entry['LPN'],
+		  $entry['PermitTag'],
+		  $entry['PermitClass'],
+		  $entry['Extended'] ? "Yes" : "No",
+		  sprintf("%.02f", $entry['Cost'])));
+  }
+}
+
+function chpreport_whitelist($company_id, $property_id, $lot_id) {
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $profile_id = $policy['ProfileId'];
+    $profile = chdbprop_get_profile($profile_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+  
+  $entries = chdbperm_get_permits($company_id, $property_id,
+				  $filter_lot, $lot_id);
+
+  if (!empty($profile) and $profile['LongPolicy']) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Tag</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+	$expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+	$expiry_str = $expiry->format("M j,y H:i");
+      } else {
+	$expiry_str = '';
+      }
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  } elseif (!empty($profile) and $profile['ShortPolicy']) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Suite</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Class</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+	$expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+	$expiry_str = $expiry->format("M j,y H:i");
+      } else {
+	$expiry_str = '';
+      }
+
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '<td align="center">'.$entry['PermitClass'].'</td>';
+      if (!strcmp($entry['PermitClass'], 'Regular')) {
+	$html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+      } else {
+	$html .= '<td align="center"></td>';
+      }
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  } elseif (empty($profile) or (!empty($profile) and $profile['LongShortPolicy'])) {
+    $style = "border-bottom:1px solid #b0b0b0;";
+    $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+    $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Tag/Suite</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Class</b></td>';
+    $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+    $html .= '</tr>';
+    foreach ($entries as $entry) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+      if (!empty($entry['ExpiryTime'])) {
+	$expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+	$expiry_str = $expiry->format("M j,y H:i");
+      } else {
+	$expiry_str = '';
+      }
+
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+      $html .= '<td align="center">'.$entry['LPN'].'</td>';
+      $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+      $html .= '<td align="center">'.$expiry_str.'</td>';
+      $html .= '<td align="center">'.$entry['PermitClass'].'</td>';
+      $html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+      $html .= '</tr>';
+    }
+    $html .= '</table>';
+  }
+  return $html;
+}
+
+function chpreport_whitelist_csv($company_id, $property_id, $lot_id) {
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+    $profile_id = $policy['ProfileId'];
+    $profile = chdbprop_get_profile($profile_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+  
+  $entries = chdbperm_get_permits($company_id, $property_id,
+				  $filter_lot, $lot_id);
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Time', 'LPN', 'Tag/Suite', 'Expiry', 'Class', 'Overnight'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    if (!empty($entry['ExpiryTime'])) {
+      $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+      $expiry_str = $expiry->format("M j,y H:i");
+    } else {
+      $expiry_str = '';
+    }
+
+    fputcsv($output,
+	    array($created->format("M j,y H:i"),
+		  $entry['LPN'],
+		  $entry['PermitTag'],
+		  $expiry_str,
+		  $entry['PermitClass'],
+		  $entry['Extended'] ? "Yes" : "No"));
+  }
+}
+
+function chpreport_group($company_id, $property_id, $lot_id,
+			 $start_time, $stop_time,
+			 $permit_class, $container_id, $profile_id) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id,
+					     $permit_class, $permit_class,
+					     $container_id, $container_id,
+					     $profile_id, $profile_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id,
+					    FALSE, TRUE, //Active
+					    $permit_class, $permit_class,
+					    $container_id, $container_id,
+					    $profile_id, $profile_id));
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Suite</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Valid</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Expiry</b></td>';
+  if (!strcmp($permit_class, 'Regular')) {
+    $html .= '<td align="center" style="'.$style.'"><b>Overnight</b></td>';
+  }
+  $html .= '</tr>';
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    if (!empty($entry['ExpiryTime'])) {
+      $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+      $expiry_str = $expiry->format("M j,y H:i");
+    } else {
+      $expiry_str = '';
+    }
+
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="center">'.$entry['LPN'].'</td>';
+    $html .= '<td align="center">'.$entry['PermitTag'].'</td>';
+    $html .= '<td align="center">'.($entry['Active'] ? 'Yes' : 'No').'</td>';
+    $html .= '<td align="center">'.$expiry_str.'</td>';
+    if (!strcmp($permit_class, 'Regular')) {
+      $html .= '<td align="center">'.($entry['Extended'] ? "Yes" : "No").'</td>';
+    }
+    $html .= '</tr>';
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_group_csv($company_id, $property_id, $lot_id,
+			     $start_time, $stop_time,
+			     $permit_class, $container_id, $profile_id) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+    $policy = chdbprop_get_policy($property_id, $lot_id);
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_history_permits($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id,
+					     $permit_class, $permit_class,
+					     $container_id, $container_id,
+					     $profile_id, $profile_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbperm_get_permits_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id,
+					    FALSE, TRUE, //Active
+					    $permit_class, $permit_class,
+					    $container_id, $container_id,
+					    $profile_id, $profile_id));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Time', 'LPN', 'Suite', 'Valid', 'Expiry', 'Class', 'Overnight'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    if (!empty($entry['ExpiryTime'])) {
+      $expiry = chpuser_datetime_utc_to_usertimezone($entry['ExpiryTime']);
+      $expiry_str = $expiry->format("M j,y H:i");
+    } else {
+      $expiry_str = '';
+    }
+
+    fputcsv($output,
+	    array($created->format("M j,y H:i"),
+		  $entry['LPN'],
+		  $entry['PermitTag'],
+		  $entry['Active'] ? 'Yes' : 'No',
+		  $expiry_str,
+		  $entry['PermitClass'],
+		  $entry['Extended'] ? "Yes" : "No"));
+  }
+}
+
+function chpreport_tickets($company_id, $property_id, $lot_id,
+			   $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbtick_get_history_tickets($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbtick_get_tickets_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id));
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Ticket</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>By</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Code</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Amount</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Pending</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Paid</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Archived</b></td>';
+  $html .= '</tr>';
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center">'.$entry['TicketId'].'</td>';
+    $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="center">'.$entry['PatrollerId'].'</td>';
+    $html .= '<td align="center">'.$entry['Code'].'</td>';
+    $html .= '<td align="center">'.$entry['LPN'].'</td>';
+    $html .= '<td align="center">'.sprintf("%.02f", $entry['Amount']).'</td>';
+    $html .= '<td align="center">'.($entry['Confirmed'] ? 'No' : 'Yes').'</td>';
+    $html .= '<td align="center">'.($entry['Paid'] ? 'Yes' : 'No').'</td>';
+    $html .= '<td align="center">'.($entry['Active'] ? 'No' : 'Yes').'</td>';
+    $html .= '</tr>';
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_tickets_csv($company_id, $property_id, $lot_id,
+			       $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbtick_get_history_tickets($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $company_id, $property_id,
+					     $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbtick_get_tickets_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $company_id, $property_id,
+					    $filter_lot, $lot_id));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Ticket', 'Time', 'By', 'Code', 'LPN',
+		'Amount', 'Pending', 'Paid', 'Archived'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    fputcsv($output,
+	    array($entry['TicketId'],
+		  $created->format("M j,y H:i"),
+		  $entry['PatrollerId'],
+		  $entry['Code'],
+		  $entry['LPN'],
+		  sprintf("%.02f", $entry['Amount']),
+		  $entry['Confirmed'] ? 'No' : 'Yes',
+		  $entry['Paid'] ? 'Yes' : 'No',
+		  $entry['Active'] ? 'No' : 'Yes'));
+  }
+}
+
+function chpreport_ticket_revenue($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if ($lot_id !== 'ANY') {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbtick_get_history_tickets($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $property_id,
+					     $filter_lot, $lot_id,
+					     TRUE, TRUE));
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbtick_get_tickets_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $property_id,
+					    $filter_lot, $lot_id,
+					    TRUE, TRUE));
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Ticket</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Code</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Amount</b></td>';
+  $html .= '</tr>';
+  $day_total = -1;
+  $grand_total = 0;
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $day = $created->format("j");
+    if ($day_total == -1) {
+      $prev_day = $day;
+      $day_total = 0;
+    }
+    $day_total += $entry['Amount'];
+    $grand_total += $entry['Amount'];
+
+    if ($day != $prev_day) {
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $prev_day = $day;
+      $html .= '<td align="right" colspan="4" class="noborder"><b>Total:</b></td>';
+      $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $day_total).'</td>';
+      $html .= '</tr>';
+      $day_total = 0;
+    }
+
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center">'.$entry['TicketId'].'</td>';
+    $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="center">'.$entry['Code'].'</td>';
+    $html .= '<td align="center">'.$entry['LPN'].'</td>';
+    $html .= '<td align="center">'.sprintf("%.02f", $entry['Amount']).'</td>';
+    $html .= '</tr>';
+  }
+  if ($day_total != -1) {
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="right" colspan="4" class="noborder"><b>Total:</b></td>';
+    $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $day_total).'</td>';
+    $html .= '</tr>';
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="right" colspan="4" class="noborder"><b>Grand total:</b></td>';
+    $html .= '<td align="center" class="noborder">'.sprintf("%.02f", $grand_total).'</td>';
+    $html .= '</tr>';
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_ticket_revenue_csv($company_id, $property_id, $lot_id,
+				      $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if ($lot_id !== 'ANY') {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbtick_get_history_tickets($start->format("Y-m-d H:i:s"),
+					     $stop->format("Y-m-d H:i:s"),
+					     $property_id,
+					     $filter_lot, $lot_id,
+					     TRUE, TRUE));
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbtick_get_tickets_report($start->format("Y-m-d H:i:s"),
+					    $stop->format("Y-m-d H:i:s"),
+					    $property_id,
+					    $filter_lot, $lot_id,
+					    TRUE, TRUE));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Ticket', 'Time', 'Code', 'LPN', 'Amount'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+
+    fputcsv($output,
+	    array($entry['TicketId'],
+		  $created->format("M j,y H:i"),
+		  $entry['Code'],
+		  $entry['LPN'],
+		  sprintf("%.02f", $entry['Amount'])));
+  }
+}
+
+function chpreport_complaints($company_id, $property_id, $lot_id,
+			      $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbcomp_get_history_complaints($start->format("Y-m-d H:i:s"),
+						$stop->format("Y-m-d H:i:s"),
+						$company_id, $property_id,
+						$filter_lot, $lot_id));
+  //print_r($entries);print('<br>');
+
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbcomp_get_complaints_report($start->format("Y-m-d H:i:s"),
+					       $stop->format("Y-m-d H:i:s"),
+					       $company_id, $property_id,
+					       $filter_lot, $lot_id));
+  //print_r($entries);print('<br>');
+
+  // Build an index to differentiate master records versus fragment records
+  $index = array();
+  $tmp = array();
+  foreach ($entries as $key => $entry) {
+    if (!$entry['Fragment']) {
+      $index[$key]['master'] = $key;
+      $tmp[$entry['ComplaintId']][] = array('key' => $key, 'active' => $entry['Active']);
+    } else {
+      $c = count($tmp[$entry['ComplaintId']]);
+      $k = $tmp[$entry['ComplaintId']][$c-1]['key'];
+      if ($entry['Active'] == $tmp[$entry['ComplaintId']][$c-1]['active']) {
+	$index[$k]['fragments'][] = $key;
+      }
+    }
+  } //print_r($index);print('<br>');
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Id</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>'.COMPLAINT_NAME.'</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Solved</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Resolution</b></td>';
+  $html .= '</tr>';
+  foreach ($index as $key => $value) {
+    $created = chpuser_datetime_utc_to_usertimezone($entries[$key]['CreateTime']);
+    if (strlen($entries[$key]['SolvedTime']) > 0) {
+      $solved = chpuser_datetime_utc_to_usertimezone($entries[$key]['SolvedTime']);
+      $solvedstr = $solved->format("M j,y H:i");
+    } else {
+      $solvedstr = 'No';
+    }
+    $rowspan = 1 + count($value['fragments']);
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center" rowspan="'.$rowspan.'">'.$entries[$key]['ComplaintId'].'</td>';
+    $html .= '<td align="center" rowspan="'.$rowspan.'">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="left">'.$entries[$key]['Complaint'].'</td>';
+    $html .= '<td align="center" rowspan="'.$rowspan.'">'.$solvedstr.'</td>';
+    $html .= '<td align="center" rowspan="'.$rowspan.'">'.$entries[$key]['Resolution'].'</td>';
+    $html .= '</tr>';
+
+    if (!isset($value['fragments'])) {
+      continue;
+    }
+    foreach ($value['fragments'] as $fragment) {
+      $updated = chpuser_datetime_utc_to_usertimezone($entries[$fragment]['CreateTime']);
+      $tmp = 'Added '.$updated->format("M j,y H:i").':<br>';
+      $tmp .= $entries[$fragment]['Complaint'];
+      $html .= '<tr bgcolor="#FFFFFF">';
+      $html .= '<td align="left">'.$tmp.'</td>';
+      $html .= '</tr>';
+    }
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_complaints_csv($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  $profile = array();
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbcomp_get_history_complaints($start->format("Y-m-d H:i:s"),
+						$stop->format("Y-m-d H:i:s"),
+						$company_id, $property_id,
+						$filter_lot, $lot_id));
+
+  // Current listings
+  $entries =
+    array_merge($entries,
+		chdbcomp_get_complaints_report($start->format("Y-m-d H:i:s"),
+					       $stop->format("Y-m-d H:i:s"),
+					       $company_id, $property_id,
+					       $filter_lot, $lot_id));
+
+  // Build an index to differentiate master records versus fragment records
+  $index = array();
+  $tmp = array();
+  foreach ($entries as $key => $entry) {
+    if (!$entry['Fragment']) {
+      $index[$key]['master'] = $key;
+      $tmp[$entry['ComplaintId']][] = array('key' => $key, 'active' => $entry['Active']);
+    } else {
+      $c = count($tmp[$entry['ComplaintId']]);
+      $k = $tmp[$entry['ComplaintId']][$c-1]['key'];
+      if ($entry['Active'] == $tmp[$entry['ComplaintId']][$c-1]['active']) {
+	$index[$k]['fragments'][] = $key;
+      }
+    }
+  }
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Id', 'Time', COMPLAINT_NAME,
+		'AddTime', 'Addition',
+		'Solved', 'Resolution'));
+
+  foreach ($index as $key => $value) {
+    $created = chpuser_datetime_utc_to_usertimezone($entries[$key]['CreateTime']);
+    if (strlen($entries[$key]['SolvedTime']) > 0) {
+      $solved = chpuser_datetime_utc_to_usertimezone($entries[$key]['SolvedTime']);
+      $solvedstr = $solved->format("M j,y H:i");
+    } else {
+      $solvedstr = 'No';
+    }
+    $rowspan = 1 + count($value['fragments']);
+
+    fputcsv($output,
+	    array($entries[$key]['ComplaintId'],
+		  $created->format("M j,y H:i"),
+		  $entries[$key]['Complaint'],
+		  '',
+		  '',
+		  $solvedstr,
+		  $entries[$key]['Resolution']));
+
+    if (!isset($value['fragments'])) {
+      continue;
+    }
+    foreach ($value['fragments'] as $fragment) {
+      $updated = chpuser_datetime_utc_to_usertimezone($entries[$fragment]['CreateTime']);
+
+      fputcsv($output,
+	      array('',
+		    '',
+		    '',
+		    $updated->format("M j,y H:i"),
+		    $entries[$fragment]['Complaint'],
+		    '',
+		    ''));
+    }
+  }
+}
+
+function chpreport_boots($company_id, $property_id, $lot_id,
+			 $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbboot_get_history_boots($start->format("Y-m-d H:i:s"),
+					   $stop->format("Y-m-d H:i:s"),
+					   $company_id,
+					   TRUE, $property_id,
+					   $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbboot_get_boots_report($start->format("Y-m-d H:i:s"),
+					  $stop->format("Y-m-d H:i:s"),
+					  $company_id,
+					  TRUE, $property_id,
+					  $filter_lot, $lot_id));
+
+  $style = "border-bottom:1px solid #b0b0b0;";
+  $html .= '<table><tr bgcolor="#e2e2e2" height="35">';
+  $html .= '<td align="center" style="'.$style.'"><b>Boot</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Time</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>By</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>LPN</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Comment</b></td>';
+  $html .= '<td align="center" style="'.$style.'"><b>Action</b></td>';
+  $html .= '</tr>';
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $html .= '<tr bgcolor="#FFFFFF">';
+    $html .= '<td align="center">'.$entry['BootId'].'</td>';
+    $html .= '<td align="center">'.$created->format("M j,y H:i").'</td>';
+    $html .= '<td align="center">'.$entry['PatrollerId'].'</td>';
+    $html .= '<td align="center">'.$entry['LPN'].'</td>';
+    if (strcmp($entry['Comment'], 'None')) {
+      $html .= '<td align="center">'.$entry['Comment'].'</td>';
+    } else {
+      $html .= '<td align="center"></td>';
+    }
+    $html .= '<td align="center">'.($entry['Active'] ? 'Mount' : 'Unmount').'</td>';
+    $html .= '</tr>';
+  }
+  $html .= '</table>';
+  return $html;
+}
+
+function chpreport_boots_csv($company_id, $property_id, $lot_id,
+			     $start_time, $stop_time) {
+  $start = chpuser_datetime_usertimezone_to_utc($start_time);
+  $stop = chpuser_datetime_usertimezone_to_utc($stop_time);
+
+  if (strcmp($lot_id, 'ANY')) {
+    $filter_lot = TRUE;
+  } else {
+    $filter_lot = FALSE;
+  }
+
+  $entries = array();
+  // History comes first
+  $entries =
+    array_merge($entries,
+  		chdbboot_get_history_boots($start->format("Y-m-d H:i:s"),
+					   $stop->format("Y-m-d H:i:s"),
+					   $company_id,
+					   TRUE, $property_id,
+					   $filter_lot, $lot_id));
+  // Current listings
+  $entries =
+    array_merge($entries,
+  		chdbboot_get_boots_report($start->format("Y-m-d H:i:s"),
+					  $stop->format("Y-m-d H:i:s"),
+					  $company_id,
+					  TRUE, $property_id,
+					  $filter_lot, $lot_id));
+
+  drupal_set_header('Content-Type:text/csv;charset=utf-8');
+  drupal_set_header('Content-Disposition:attachment;filename=report.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('Boot', 'Time', 'By', 'LPN', 'Comment', 'Action'));
+
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+
+    fputcsv($output,
+	    array($entry['BootId'],
+		  $created->format("M j,y H:i"),
+		  $entry['PatrollerId'],
+		  $entry['LPN'],
+		  $entry['Comment'],
+		  $entry['Active'] ? 'Mount' : 'Unmount'));
+  }
+}
+
+function chpreport_create_window_form($company_id, $property_id, $lot_id,
+				      $report, $start_time, $stop_time) {
+  $info = chpreport_create_header_old($company_id, $property_id, $lot_id,
+				  $report,
+				  $start_time,
+				  $stop_time);
+
+  if ($report === 'PermitActDeact') {
+
+    $info .= chpreport_activation_deactivation_old($company_id, $property_id, $lot_id,
+					       $start_time, $stop_time);
+
+  } elseif ($report === 'PermitContainerUsage') {
+
+    $info .= chpreport_container_usage_old($company_id, $property_id, $lot_id,
+				       $start_time, $stop_time);
+
+  } elseif ($report === 'OccuCompliant') {
+
+    $info .= chpreport_occu_white($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time);
+
+  } elseif ($report === 'OccuNonCompliant') {
+
+    $info .= chpreport_occu_yellow($company_id, $property_id, $lot_id,
+				   $start_time, $stop_time);
+
+  } elseif ($report === 'MeterCreditCard') {
+
+    $info .= chpreport_meter_credit_card($company_id, $property_id, $lot_id,
+					 $start_time, $stop_time);
+
+  } elseif ($report === 'MeterCash') {
+
+    $info .= chpreport_meter_cash_old($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time);
+
+  } elseif ($report === 'MeterRevenue') {
+
+    $info .= chpreport_meter_revenue_old($company_id, $property_id, $lot_id,
+				     $start_time, $stop_time);
+
+  } elseif (strpos($report, 'Group_') === 0) {
+
+    $tag = substr($report, strlen('Group_'));
+
+    if ($tag === 'Regular') {
+      $info .= chpreport_group($company_id, $property_id, $lot_id,
+			       $start_time, $stop_time,
+			       $tag, NULL, NULL);
+    } else {
+      $container_id = substr($tag, 0, strpos($tag, '__'));
+      $type_id = substr($tag, strlen($container_id) + strlen('__'));
+      $info .= chpreport_group($company_id, $property_id, $lot_id,
+			       $start_time, $stop_time,
+			       NULL, $container_id, $type_id);
+    }
+
+  } elseif ($report === 'Tickets') {
+
+    $info .= chpreport_tickets($company_id, $property_id, $lot_id,
+			       $start_time, $stop_time);
+
+  } elseif ($report === 'TicketsRev') {
+    $info .= chpreport_ticket_revenue($company_id, $property_id, $lot_id,
+				      $start_time, $stop_time);
+
+  } elseif ($report === 'Complaints') {
+
+    $info .= chpreport_complaints($company_id, $property_id, $lot_id,
+				  $start_time, $stop_time);
+
+  } elseif ($report === 'Boots') {
+
+    $info .= chpreport_boots($company_id, $property_id, $lot_id,
+			     $start_time, $stop_time);
+
+  } else {
+    $info .= 'Internal error. Contact support and provide details.';
+  }
+
+  return $info;
+}
+
+
+
+function chpreport_create_csv_form($company_id, $property_id, $lot_id,
+				   $report, $start_time, $stop_time) {
+
+  if ($report === 'Permit') {
+
+    chpreport_permit_csv($company_id, $property_id, $lot_id,
+			 $start_time, $stop_time);
+
+  } elseif ($report === 'PermitRev') {
+
+    chpreport_permit_revenue_csv($company_id, $property_id, $lot_id,
+				 $start_time, $stop_time);
+
+  } elseif ($report === 'WhiteList') {
+
+    chpreport_whitelist_csv($company_id, $property_id, $lot_id);
+
+  } elseif (strpos($report, 'Group_') === 0) {
+
+    $tag = substr($report, strlen('Group_'));
+
+    if ($tag === 'Regular') {
+      $info .= chpreport_group_csv($company_id, $property_id, $lot_id,
+				   $start_time, $stop_time,
+				   $tag, NULL, NULL);
+    } else {
+      $container_id = substr($tag, 0, strpos($tag, '__'));
+      $type_id = substr($tag, strlen($container_id) + strlen('__'));
+      $info .= chpreport_group_csv($company_id, $property_id, $lot_id,
+				   $start_time, $stop_time,
+				   NULL, $container_id, $type_id);
+    }
+
+  } elseif ($report === 'Tickets') {
+
+    chpreport_tickets_csv($company_id, $property_id, $lot_id,
+			  $start_time, $stop_time);
+
+  } elseif ($report === 'TicketsRev') {
+
+    chpreport_ticket_revenue_csv($company_id, $property_id, $lot_id,
+				 $start_time, $stop_time);
+
+  } elseif ($report === 'Complaints') {
+
+    chpreport_complaints_csv($company_id, $property_id, $lot_id,
+			     $start_time, $stop_time);
+
+  } elseif ($report === 'Boots') {
+
+    chpreport_boots_csv($company_id, $property_id, $lot_id,
+			$start_time, $stop_time);
+
+  }
+
+}
+
+
+
+/* function chpreport_create_form_after_build($element) { */
+/*   $element['Last24']['#attributes']['onchange'] = */
+/*     'StartTime.value=chptime_24h();StopTime.value=chptime_now();'; */
+/*   $element['Cmonth']['#attributes']['onchange'] = */
+/*     'StartTime.value=chptime_monthstart();StopTime.value=chptime_now();'; */
+/*   $element['Pmonth']['#attributes']['onchange'] = */
+/*     'StartTime.value=chptime_prevmonthstart();StopTime.value=chptime_prevmonthend();'; */
+/*   $element['Range']['#attributes']['onchange'] = */
+/*     'StartTime.value="";StopTime.value="";'; */
+/*   return $element; */
+/* } */
+
+
+  /* drupal_add_js */
+  /*   ('$(function() { */
+  /* 	$("#edit-StartTime").datepicker({dateFormat: "yy-mm-dd 00:00:00"}); */
+  /* 	$("#edit-StopTime").datepicker({dateFormat: "yy-mm-dd 23:59:59"}); */
+  /*     }); */
+  /*     function chptime_now(){ */
+  /*       currentTime=new Date(); */
+  /*       var day=currentTime.getDate();if (day<10) {day="0"+day;} */
+  /*       var month=currentTime.getMonth()+1;if (month<10) {month="0"+month;} */
+  /*       var year=currentTime.getFullYear(); */
+  /*       var hours=currentTime.getHours();if (hours<10) {hours="0"+hours;} */
+  /*       var minutes=currentTime.getMinutes();if (minutes<10) {minutes="0"+minutes;} */
+  /*       var seconds=currentTime.getSeconds();if (seconds<10) {seconds="0"+seconds;} */
+  /*       return String(year+"-"+month+"-"+day+" "+hours+":"+minutes+":"+seconds); */
+  /*     }; */
+  /*     function chptime_24h(){ */
+  /*       currentTime=new Date(); */
+  /*       previousTime=new Date(currentTime.getFullYear(),currentTime.getMonth(),currentTime.getDate()-1); */
+  /*       var day=previousTime.getDate();if (day<10) {day="0"+day;} */
+  /*       var month=previousTime.getMonth()+1;if (month<10) {month="0"+month;} */
+  /*       var year=previousTime.getFullYear(); */
+  /*       var hours=currentTime.getHours();if (hours<10) {hours="0"+hours;} */
+  /*       var minutes=currentTime.getMinutes();if (minutes<10) {minutes="0"+minutes;} */
+  /*       var seconds=currentTime.getSeconds();if (seconds<10) {seconds="0"+seconds;} */
+  /*       return String(year+"-"+month+"-"+day+" "+hours+":"+minutes+":"+seconds); */
+  /*     }; */
+  /*     function chptime_monthstart(){ */
+  /*       currentTime=new Date(); */
+  /*       var month=currentTime.getMonth()+1;if (month<10) {month="0"+month;} */
+  /*       var year=currentTime.getFullYear(); */
+  /*       return String(year+"-"+month+"-01 00:00:00"); */
+  /*     }; */
+  /*     function chptime_prevmonthstart(){ */
+  /*       currentTime=new Date(); */
+  /*       previousTime=new Date(currentTime.getFullYear(),currentTime.getMonth()-1,currentTime.getDate()); */
+  /*       var month=previousTime.getMonth()+1;if (month<10) {month="0"+month;} */
+  /*       var year=previousTime.getFullYear(); */
+  /*       return String(year+"-"+month+"-01 00:00:00"); */
+  /*     }; */
+  /*     function chptime_prevmonthend(){ */
+  /*       currentTime=new Date(); */
+  /*       previousTime=new Date(currentTime.getFullYear(),currentTime.getMonth(),1,0,0,-1); */
+  /*       var day=previousTime.getDate();if (day<10) {day="0"+day;} */
+  /*       var month=previousTime.getMonth()+1;if (month<10) {month="0"+month;} */
+  /*       var year=previousTime.getFullYear(); */
+  /*       return String(year+"-"+month+"-"+day+" 23:59:59"); */
+  /*     }', */
+  /*    'inline'); */

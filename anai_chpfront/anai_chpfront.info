@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Front Page
+description = Front Page
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

@@ -1,0 +1,53 @@
+<?php
+
+function anai_supervision_xmlrpc () {
+  $methods[] = array('anai_supervision.getSystemIssues',
+		     'anai_supervision_get_system_issues',
+		     array('array', 'string'));
+  return $methods;
+}
+
+function anai_supervision_get_system_issues ($auth_key) {
+  // Return array with issues if any
+  $issues = array();
+
+  // Retrieve all properties
+  $properties = array();
+  foreach (chdbprop_get_all_properties() as $property) {
+    $properties[$property['PropertyId']] = decode_entities($property['Alias']);
+  }
+
+  // Videopark controllers not reporting
+  foreach (chdbprop_get_all_apps() as $app) {
+    if (!$app['VideoparkPolicy']) {
+      continue;
+    }
+    foreach ($properties as $property_id => $alias) {
+      $clusters = chdbprop_get_lane_clusters($property_id, $app['AppId']);
+      foreach ($clusters as $cluster_id => $flag) {
+	$clusterstatus = chdbprop_get_clusterstatus($app['AppId'], $cluster_id);
+	if (!empty($clusterstatus)) {
+	  $time = chpuser_datetime_utc_to_utc($clusterstatus['LastUTC']);
+	  $time->modify("+10 minutes");
+	  $now = chpuser_datetime_utc_to_utc('now');
+	  if ($now > $time) {
+	    $time = chpuser_datetime_utc_to_utc('now');
+	    $issues[] = array(decode_entities($app['Alias']),
+			      t('Communication missing for ').$alias,
+			      $time->format("Y-m-d H:i:s"));
+	  }
+	}
+      }
+    }
+  }
+
+  $output = array(count($issues));
+  foreach ($issues as $issue) {
+    $output = array_merge($output, $issue);
+  }
+
+  return $output;
+}
+
+
+

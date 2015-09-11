@@ -1,0 +1,1497 @@
+<?php
+// $Id$
+require_once("anai_chppatrol.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * Patroller Management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chppatrol_perm() {
+  return array('anai chp add patrollers',
+	       'anai chp edit patrollers',
+	       'anai chp list patrollers',
+	       'anai chp delete patrollers',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chppatrol_theme($existing, $type, $theme, $path) {
+  return array
+    ('chppat_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chppatrol_menu() {
+  $items = array();
+  $items['chppatadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chppat_add_form'),
+     'access arguments' => array('anai chp add patrollers'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppatlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chppat_list_form'),
+     'access arguments' => array('anai chp list patrollers'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Patrollers add
+ ********** Address: chppatadd
+ ********** Access:  'anai chp add patrollers'
+ *********/
+
+
+
+function chppat_add_form($form_state) {
+  drupal_set_title(t('Add '.strtolower(PATROLLER_NAME)));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+
+  // If you are Enforcer, then the patroller becomes an enforcment patroller
+  // If you are not Enforcer, the patroller becomes a company patroller
+  if (((in_array('Admin', array_values($account->roles)) or
+	in_array('Enforcer', array_values($account->roles))) and
+       $account->status) or
+      $account->uid == 1) {
+  }
+
+  // Create property options
+  $property_options = array();
+  if (!empty($form_state['storage']['ajax']['Properties'])) {
+    foreach ($form_state['storage']['ajax']['Properties'] as $property_id => $property) {
+      $property_options[$property_id] =
+	decode_entities($property['data']['Alias']).', '.
+	decode_entities($property['data']['Street']).', '.
+	decode_entities($property['data']['City']);
+    }
+  }
+
+  if (empty($property_options)) {
+    $form['ajax']['error'] = array('#value' => '<p>'.t('Property missing.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chppat_add_form_submit_cancel'));
+
+    return $form;
+  }
+
+  // Property/Lot selector
+  $form['ajax']['property'] = array('#type' => 'fieldset', '#title' => t('Assignment'));
+
+  // Layout property options
+  if (isset($form_state['storage']['ajax']['property']['PropertyId']) and
+      !in_array($form_state['storage']['ajax']['property']['PropertyId'],
+		array_keys($property_options))) {
+    unset($form_state['storage']['ajax']['property']['PropertyId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['PropertyId'])) {
+    $form_state['storage']['ajax']['property']['PropertyId'] = key($property_options);
+  }
+  if (1 < count($property_options)) {
+    $form['ajax']['property']['PropertyId'] =
+      array('#type' => 'select',
+	    '#title' => t('Property'),
+	    '#options' => $property_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['PropertyId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  $property_id = $form_state['storage']['ajax']['property']['PropertyId'];
+
+  // Create lot options
+  $lot_options = array();
+  $policy_filters = array('ValetPolicy');
+  $enforcement_filters = array('MobilePolicy');
+  $policies = chpprop_retrieve_policies($user->uid, $company_id,
+					$policy_filters,
+					$enforcement_filters);
+  if (!empty($policies)) {
+    if (isset($policies[$property_id])) {
+      foreach ($policies[$property_id] as $lot_id => $policy) {
+	$lot_options[$lot_id] = decode_entities($policy['data']['Alias']);
+      }
+    }
+  }
+
+  if (empty($lot_options)) {
+    $form['ajax']['property']['error'] =
+      array('#value' => '<p>'.t('Lot yet to be configured for patrollers, impossible to continue.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chppat_add_form_submit_cancel'));
+
+    return $form;
+  }
+
+  if (isset($form_state['storage']['ajax']['property']['LotId']) and
+      !in_array($form_state['storage']['ajax']['property']['LotId'],
+		array_keys($lot_options))) {
+    unset($form_state['storage']['ajax']['property']['LotId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['LotId'])) {
+    $form_state['storage']['ajax']['property']['LotId'] = key($lot_options);
+  }
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['LotId']);
+  }
+
+  $lot_id = $form_state['storage']['ajax']['property']['LotId'];
+
+  if (1 < count($property_options) or 1 < count($lot_options)) {
+    $form['ajax']['property']['addbtn'] = array('#type' => 'button', '#value' => t('Add'));
+    $form['ajax']['property']['clearbtn'] = array('#type' => 'button', '#value' => t('Clear'));
+    $form['ajax']['property']['allbtn'] = array('#type' => 'button', '#value' => t('All'));
+    if (!isset($form_state['storage']['ajax']['property']['List'])) {
+      $list = array();
+      $form_state['storage']['ajax']['property']['List'] = $list;
+    } else {
+      $list = unserialize($form_state['storage']['ajax']['property']['List']);
+    }
+
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      $list[$property_id][$lot_id] = TRUE;
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $list = array();
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'allbtn') !== FALSE) {
+      foreach ($property_options as $propkey => $propvalue) {
+	foreach ($policies[$propkey] as $lotkey => $lotvalue) {
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+    }
+  } else {
+    $list[$property_id][$lot_id] = TRUE;
+  }
+
+  $form['ajax']['property']['List'] = array('#type' => 'value', '#value' => serialize($list));
+
+  $header = array(t('Property'), t('Lot'));
+  $rows = array();
+  foreach ($list as $property_id => $values) {
+    foreach ($values as $lot_id => $value) {
+      $rows[] = array($property_options[$property_id], $lot_options[$lot_id]);
+    }
+  }
+  $form['ajax']['property']['ListView'] = array('#value' => theme_table($header, $rows));
+
+  // Layout patroller
+  if (!isset($form_state['storage']['ajax']['PatrollerId'])) {
+    $form_state['storage']['ajax']['PatrollerId'] = '';
+  }
+  $form['ajax']['PatrollerId'] =
+    array('#type' => 'textfield',
+	  '#title' => PATROLLER_NAME.t(' number'),
+	  '#maxlength' => 8,
+	  '#description' => t('Digits only'),
+	  '#default_value' => $form_state['storage']['ajax']['PatrollerId']);
+
+  // Layout password
+  if (!isset($form_state['storage']['ajax']['Password'])) {
+    $form_state['storage']['ajax']['Password'] = '';
+  }
+  $form['ajax']['Password'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Password'),
+	  '#maxlength' => 16,
+	  '#default_value' => $form_state['storage']['ajax']['Password']);
+
+  // Create session options
+  $options = array();
+  $options['60'] = t('One hour');
+  $options['120'] = t('Two hours');
+  $options['180'] = t('Three hours');
+  $options['240'] = t('Four hours');
+  $options['300'] = t('Five hours');
+  $options['360'] = t('Six hours');
+  $options['420'] = t('Seven hours');
+  $options['480'] = t('Eight hours');
+  $options['540'] = t('Nine hours');
+  $options['600'] = t('Ten hours');
+
+  // Layout session
+  if (!isset($form_state['storage']['ajax']['Session'])) {
+    $form_state['storage']['ajax']['Session'] = '480';
+  }
+  $form['ajax']['Session'] =
+    array('#type' => 'select',
+	  '#title' => t('Session timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Session']);
+
+  // Create idle options
+  $options = array();
+  $options['15'] = t('15 minutes');
+  $options['30'] = t('30 minutes');
+  $options['45'] = t('45 minutes');
+  $options['60'] = t('One hour');
+  $options['90'] = t('One hour and 30 minutes');
+  $options['120'] = t('Two hours');
+  $options['150'] = t('Two hours and 30 minutes');
+  $options['180'] = t('Three hours');
+
+  // Layout idle
+  if (!isset($form_state['storage']['ajax']['Idle'])) {
+    $form_state['storage']['ajax']['Idle'] = '120';
+  }
+  $form['ajax']['Idle'] =
+    array('#type' => 'select',
+	  '#title' => t('Idle timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Idle']);
+
+  // Create permission options
+  $options = array();
+  $options['Tickets'] = t('Tickets');
+  $options['Boots'] = t('Boots');
+  $options['Towing'] = t('Towing');
+  $options['Whitelist'] = t('Whitelist');
+  $options['Hotlist'] = t('Hotlist');
+  $options['Valet'] = t('Valet');
+
+  $form['ajax']['config'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Permissions'));
+
+  // Layout permissions options
+  if (!isset($form_state['storage']['ajax']['config']['Permissions'])) {
+    $form_state['storage']['ajax']['config']['Permissions'] = array();
+  }
+  $form['ajax']['config']['Permissions'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['config']['Permissions'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Layout enforcer selection
+  if ($form_state['storage']['ajax']['config']['Permissions']['Tickets'] or
+      $form_state['storage']['ajax']['config']['Permissions']['Boots'] or
+      $form_state['storage']['ajax']['config']['Permissions']['Towing']) {
+    $options = array();
+    foreach (chpprop_retrieve_enforcers($user->uid, $company_id) as $enforcer_id => $enforcer) {
+      $options[$enforcer_id] =
+	decode_entities($enforcer['data']['Alias']).', '.
+	decode_entities($enforcer['data']['Street']).', '.
+	decode_entities($enforcer['data']['City']);
+    }
+
+    if (empty($options)) {
+      $form['ajax']['config']['error'] =
+	array('#value' => t('Enforcers yet to be configured, impossible to continue.'));
+      $form['ajax']['cancel'] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	      '#submit' => array('chppat_add_form_submit_cancel'));
+      return $form;
+    }
+
+    if (!isset($form_state['storage']['ajax']['config']['EnforcerId'])) {
+      $form_state['storage']['ajax']['config']['EnforcerId'] = key($options);
+    }
+    $form['ajax']['config']['EnforcerId'] =
+      array('#type' => 'select',
+	    '#title' => t('Enforcer'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['config']['EnforcerId']);
+  }
+
+  if ($form_state['storage']['ajax']['config']['Permissions']['Tickets']) {
+    // Layout TicketSeed
+    if (!isset($form_state['storage']['ajax']['config']['TicketSeed'])) {
+      $form_state['storage']['ajax']['config']['TicketSeed'] = '';
+    }
+    $form['ajax']['config']['TicketSeed'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Unique 4-digit Ticket Number Seed'),
+	    '#maxlength' => 4,
+	    '#default_value' => $form_state['storage']['ajax']['config']['TicketSeed'],
+	    '#description' => t('Will be used by mobile units when creating tickets.<br>'.
+				'Ticket nummer format: YYMMDDSSSSNNNN<br>'.
+				'Where YY=Year, MM=Month, DD=Day, SSSS=Ticket seed, NNNN=Counter'));
+  }
+
+  // Layout person
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['subtag'] = 'person';
+  $settings['subframe'] = TRUE;
+  $settings['subframetitle'] = t('Key owner');
+  $settings['option']['companynameopt'] = $company_id;
+  $settings['option']['skipnotrequired'] = TRUE;
+  $settings['option']['skipemailnotification'] = TRUE;
+  chpprop_produce_person($form, $form_state, $settings);
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chppat_add_form_validate_save'),
+	  '#submit' => array('chppat_add_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chppat_add_form_submit_cancel'));
+  return $form;
+}
+
+function chppat_add_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppatlist';
+}
+
+function chppat_add_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['ajax']['PatrollerId'])) {
+    form_set_error
+      ('ajax][PatrollerId',
+       PATROLLER_NAME.t(' number field is required.'));
+    return;
+  }
+  if (!preg_match('/^\d+$/', $form_state['values']['ajax']['PatrollerId'])) {
+    form_set_error
+      ('ajax][PatrollerId',
+       PATROLLER_NAME.t(' number must be a numeric value.'));
+    return;
+  }
+  if (empty($form_state['values']['ajax']['Password'])) {
+    form_set_error('ajax][Password', t('Password field is required.'));
+    return;
+  }
+  if (strpos($form_state['values']['ajax']['Password'], '<') !== FALSE or
+      strpos($form_state['values']['ajax']['Password'], ';') !== FALSE or
+      strpos($form_state['values']['ajax']['Password'], '>') !== FALSE) {
+    form_set_error
+      ('ajax][Password',
+       t('Sorry, password can\'t include < or > or ; characters.'));
+    return;
+  }
+
+  if (isset($form_state['values']['ajax']['config']['TicketSeed']) and
+      empty($form_state['values']['ajax']['config']['TicketSeed'])) {
+    form_set_error('ajax][config][TicketSeed', 'Ticket number seed field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['config']['TicketSeed']) and
+      !preg_match('/^\d{4}$/', $form_state['values']['ajax']['config']['TicketSeed'])) {
+    form_set_error('ajax][config][TicketSeed', 'Ticket number seed must be four digits.');
+    return;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['FirstName']) and
+      empty($form_state['values']['ajax']['person']['FirstName'])) {
+    form_set_error('ajax][person][FirstName', 'First name field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['LastName']) and
+      empty($form_state['values']['ajax']['person']['LastName'])) {
+    form_set_error('ajax][person][LastName', 'Last name field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['Street']) and
+      empty($form_state['values']['ajax']['person']['Street'])) {
+    form_set_error('ajax][person][Street', 'Street field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['City']) and
+      empty($form_state['values']['ajax']['person']['City'])) {
+    form_set_error('ajax][person][City', 'City field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['PostalCode']) and
+      empty($form_state['values']['ajax']['person']['PostalCode'])) {
+    form_set_error('ajax][person][PostalCode', 'Postal code field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['Phone']) and
+      empty($form_state['values']['ajax']['person']['Phone'])) {
+    form_set_error('ajax][person][Phone', 'Phone field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['Email']) and
+      empty($form_state['values']['ajax']['person']['Email'])) {
+    form_set_error('ajax][person][Email', 'Email field is required.');
+    return;
+  }
+  if (isset($form_state['values']['ajax']['person']['Department']) and
+      empty($form_state['values']['ajax']['person']['Department'])) {
+    form_set_error('ajax][person][Department', 'Department field is required.');
+    return FALSE;
+  }
+  if (isset($form_state['values']['ajax']['person']['Title']) and
+      empty($form_state['values']['ajax']['person']['Title'])) {
+    form_set_error('ajax][person][Title', 'Title field is required.');
+    return FALSE;
+  }
+  if (isset($form_state['values']['ajax']['person']['Role']) and
+      empty($form_state['values']['ajax']['person']['Role'])) {
+    form_set_error('ajax][person][Role', 'Role field is required.');
+    return FALSE;
+  }
+  // Check GEO Coding
+  include_once drupal_get_path('module', 'location') .'/location.inc';
+  $location = array();
+  $location['street'] = $form_state['values']['ajax']['person']['Street'];
+  $location['city'] = $form_state['values']['ajax']['person']['City'];
+  $location['postal_code'] = $form_state['values']['ajax']['person']['PostalCode'];
+  $location['province'] = $form_state['values']['ajax']['person']['Province'];
+  $location['country'] = $form_state['values']['ajax']['person']['Country'];
+  $pos = location_latlon_exact($location);
+  if ($pos) {
+    $form_state['storage']['ajax']['person']['Lat'] = $pos['lat'];
+    $form_state['storage']['ajax']['person']['Lon'] = $pos['lon'];
+  }
+}
+
+function chppat_add_form_submit_save($form, &$form_state) {
+  global $user;
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $patroller_id = $form_state['values']['ajax']['PatrollerId'];
+  $password = check_plain($form_state['values']['ajax']['Password']);
+
+  // Contact person
+  if (isset($form_state['values']['ajax']['person']['PrenameId']) and
+      $form_state['values']['ajax']['person']['PrenameId'] !== 'BLANK') {
+    $prename_id = $form_state['values']['ajax']['person']['PrenameId'];
+  } else {
+    $prename_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['FirstName'])) {
+    $firstname = check_plain($form_state['values']['ajax']['person']['FirstName']);
+  } else {
+    $firstname = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['MiddleName'])) {
+    $middlename = check_plain($form_state['values']['ajax']['person']['MiddleName']);
+  } else {
+    $middlename = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['LastName'])) {
+    $lastname = check_plain($form_state['values']['ajax']['person']['LastName']);
+  } else {
+    $lastname = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['SufnameId']) and
+      $form_state['values']['ajax']['person']['SufnameId'] !== 'BLANK') {
+    $sufname_id = $form_state['values']['ajax']['person']['SufnameId'];
+  } else {
+    $sufname_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Street'])) {
+    $street = check_plain($form_state['values']['ajax']['person']['Street']);
+  } else {
+    $street = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['City'])) {
+    $city = check_plain($form_state['values']['ajax']['person']['City']);
+  } else {
+    $city = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['PostalCode'])) {
+    $postalcode = check_plain($form_state['values']['ajax']['person']['PostalCode']);
+  } else {
+    $postalcode = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Province'])) {
+    $province = $form_state['values']['ajax']['person']['Province'];
+  } else {
+    $province = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Country'])) {
+    $country = chpprop_retrieve_country($form_state['values']['ajax']['person']['Country']);
+  } else {
+    $country = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Phone'])) {
+    $phone = check_plain($form_state['values']['ajax']['person']['Phone']);
+  } else {
+    $phone = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Email'])) {
+    $email = check_plain($form_state['values']['ajax']['person']['Email']);
+  } else {
+    $email = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Role'])) {
+    $role = check_plain($form_state['values']['ajax']['person']['Role']);
+  } else {
+    $role = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Department'])) {
+    $department = check_plain($form_state['values']['ajax']['person']['Department']);
+  } else {
+    $department = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Title'])) {
+    $title = check_plain($form_state['values']['ajax']['person']['Title']);
+  } else {
+    $title = NULL;
+  }
+
+  if (isset($form_state['storage']['ajax']['person']['Lat'])) {
+    $lat = $form_state['storage']['ajax']['person']['Lat'];
+  } else {
+    $lat = NULL;
+  }
+
+  if (isset($form_state['storage']['ajax']['person']['Lon'])) {
+    $lon = $form_state['storage']['ajax']['person']['Lon'];
+  } else {
+    $lon = NULL;
+  }
+
+  $session = $form_state['values']['ajax']['Session'];
+  $idle = $form_state['values']['ajax']['Idle'];
+
+  $tickets = $form_state['values']['ajax']['config']['Permissions']['Tickets'];
+  $boots = $form_state['values']['ajax']['config']['Permissions']['Boots'];
+  $towing = $form_state['values']['ajax']['config']['Permissions']['Towing'];
+  $whitelist = $form_state['values']['ajax']['config']['Permissions']['Whitelist'];
+  $hotlist = $form_state['values']['ajax']['config']['Permissions']['Hotlist'];
+  $valet = $form_state['values']['ajax']['config']['Permissions']['Valet'];
+
+  if (isset($form_state['values']['ajax']['config']['EnforcerId'])) {
+    $enforcer_id = $form_state['values']['ajax']['config']['EnforcerId'];
+  } else {
+    $enforcer_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['config']['TicketSeed'])) {
+    $ticket_seed = $form_state['values']['ajax']['config']['TicketSeed'];
+  } else {
+    $ticket_seed = NULL;
+  }
+
+  if (chdbprop_insert_patroller
+      ($user->uid, $company_id, $patroller_id, $password, $lat, $lon,
+       $prename_id, $firstname, $middlename, $lastname, $sufname_id,
+       $street, $city, $postalcode, $province, $country,
+       $phone, $email,
+       $role, $department, $title,
+       $session, $idle,
+       $tickets, $boots, $towing, $whitelist, $hotlist, $valet,
+       $enforcer_id, $ticket_seed,
+       $id)) {
+    drupal_set_message('Could not insert patroler', 'error');
+    return;
+  }
+
+  $list = unserialize($form_state['values']['ajax']['property']['List']);
+  if (!empty($list)) {
+    foreach ($list as $propkey => $values) {
+      foreach ($values as $lotkey => $value) {
+	if ($value) {
+	  if (chdbprop_insert_patrollerprop
+	      ($company_id, $patroller_id,
+	       $propkey, $lotkey,
+	       $id)) {
+	    drupal_set_message('Could not attach to property/lot', 'error');
+	    return;
+	  }
+	}
+      }
+    }
+  }
+
+  if (chdbprop_insert_agentpoll_patroller
+      ($company_id,
+       $patroller_id)) {
+    drupal_set_message('Could not insert poll', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppatlist';
+}
+
+
+
+/**********
+ ********** Patrollers list
+ ********** Address: chppatlist
+ ********** Access:  'anai chp list patrollers'
+ *********/
+
+
+
+function chppat_list_form($form_state) {
+  if ($form_state['storage']['patroller_edit']) {
+    return chppat_list_edit_form($form_state);
+  }
+
+  drupal_set_title(PATROLLER_NAME.'s');
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chppat_list_form_submit_back';
+  if (user_access('anai chp add patrollers')) {
+    $settings['buttons']['add']['submit'] = 'chppat_list_form_submit_add';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $patrollers = chpprop_retrieve_patrollers($user->uid, $company_id, $property_id, $lot_id);
+  $form['ajax']['filter'] = array('#type' => 'fieldset', '#title' => t('Assigned patrollers'));
+  if (empty($patrollers)) {
+    $form['ajax']['filter']['list'] = array('#value' => t('Empty'));
+  } else {
+    $form['ajax']['filter']['list'] = chppat_list_table_form($patrollers);
+  }
+  $unassigned = array();
+  foreach (chpprop_retrieve_patrollers($user->uid, $company_id) as $patroller_id => $patroller) {
+    if (isset($patrollers[$patroller_id])) {
+      continue;
+    }
+    $unassigned[$patroller_id] = $patroller;
+  }
+  if (!empty($unassigned)) {
+    $form['ajax']['all'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Unassigned patrollers'),
+	    '#collapsible' => TRUE,
+	    '#collapsed' => TRUE);
+    $form['ajax']['all']['list'] = chppat_list_table_form($unassigned);
+  }
+
+  return $form;
+}
+
+function chppat_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppatadd';
+}
+
+function chppat_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chppat_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chppat_list_table');
+
+  if (user_access('anai chp edit patrollers')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $entry) {
+    if ($entry['data']['Suspended']) {
+      $form['db']['patid_'.$looper] =
+	array('#value' => '<del>'.$entry['data']['PatrollerId'].'</del>');
+    } else {
+      $form['db']['patid_'.$looper] =
+	array('#value' => $entry['data']['PatrollerId']);
+    }
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['data']['CreateTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    $form['db']['ticket_'.$looper] =
+      array('#value' => $entry['data']['Tickets'] ? t('Yes') : t('No'));
+
+    $form['db']['boots_'.$looper] =
+      array('#value' => $entry['data']['Boots'] ? t('Yes') : t('No'));
+
+    $form['db']['towing_'.$looper] =
+      array('#value' => $entry['data']['Towing'] ? t('Yes') : t('No'));
+
+    $form['db']['whitelist_'.$looper] =
+      array('#value' => $entry['data']['Whitelist'] ? t('Yes') : t('No'));
+
+    $form['db']['hotlist_'.$looper] =
+      array('#value' => $entry['data']['Hotlist'] ? t('Yes') : t('No'));
+
+    $form['db']['valet_'.$looper] =
+      array('#value' => $entry['data']['Valet'] ? t('Yes') : t('No'));
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$entry['data']['Id'],
+	      '#submit' => array('chppat_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chppat_list_table($form) {
+  // Table Header
+  $header = array(t('Id'), t('Created'), t('Tickets'), t('Boots'), t('Towing'),
+		  t('Whitelist'), t('Hotlist'), t('Valet'), '');
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'patid_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('patid_'));
+    $rows[] = array(drupal_render($form['patid_'.$looper]),
+                    drupal_render($form['time_'.$looper]),
+                    drupal_render($form['ticket_'.$looper]),
+                    drupal_render($form['boots_'.$looper]),
+                    drupal_render($form['towing_'.$looper]),
+                    drupal_render($form['whitelist_'.$looper]),
+                    drupal_render($form['hotlist_'.$looper]),
+                    drupal_render($form['valet_'.$looper]),
+                    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chppat_list_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form
+      ($form, 'Are you sure?', 'chppatlist',
+       'The '.strtolower(PATROLLER_NAME).' will be deleted permanently from the system.');
+  }
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id'];
+  $patroller = chdbprop_get_patroller_id($id);
+  $company_id = $patroller['CompanyId'];
+  $patroller_id = $patroller['PatrollerId'];
+  drupal_set_title(t('Edit '.strtolower(PATROLLER_NAME).' - '.$patroller_id));
+
+  // Create property options
+  $property_options = array();
+  $properties = chpprop_retrieve_properties($user->uid, $company_id);
+  if (!empty($properties)) {
+    foreach ($properties as $property_id => $property) {
+      $property_options[$property_id] =
+	decode_entities($property['data']['Alias']).', '.
+	decode_entities($property['data']['Street']).', '.
+	decode_entities($property['data']['City']);
+    }
+  }
+  $properties = NULL;
+
+  if (empty($property_options)) {
+    $form['error'] = array('#value' => '<p>'.t('Property missing.').'<p>');
+    $form['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chppat_list_edit_form_submit_cancel'));
+
+    return $form;
+  }
+
+  $form['Suspended'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('Temporary suspended'),
+	  '#default_value' => $patroller['Suspended'],
+	  '#description' =>
+	  t('The patroller will not be able to login while suspended'));
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  // Property/Lot selector
+  $form['ajax']['property'] = array('#type' => 'fieldset', '#title' => t('Assignment'));
+
+  // Layout property options
+  if (isset($form_state['storage']['ajax']['property']['PropertyId']) and
+      !in_array($form_state['storage']['ajax']['property']['PropertyId'],
+		array_keys($property_options))) {
+    unset($form_state['storage']['ajax']['property']['PropertyId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['PropertyId'])) {
+    $form_state['storage']['ajax']['property']['PropertyId'] = key($property_options);
+  }
+  if (1 < count($property_options)) {
+    $form['ajax']['property']['PropertyId'] =
+      array('#type' => 'select',
+	    '#title' => t('Property'),
+	    '#options' => $property_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['PropertyId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+  }
+
+  $property_id = $form_state['storage']['ajax']['property']['PropertyId'];
+
+  // Create lot options
+  $lot_options = array();
+  $policy_filters = array('ValetPolicy');
+  $enforcement_filters = array('MobilePolicy');
+  $policies = chpprop_retrieve_policies($user->uid, $company_id,
+					$policy_filters,
+					$enforcement_filters);
+  if (!empty($policies)) {
+    if (isset($policies[$property_id])) {
+      foreach ($policies[$property_id] as $lot_id => $policy) {
+	$lot_options[$lot_id] = decode_entities($policy['data']['Alias']);
+      }
+    }
+  }
+
+  if (empty($lot_options)) {
+    $form['ajax']['property']['error'] =
+      array('#value' => '<p>'.t('Lot yet to be configured for patrollers, impossible to continue.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chppat_list_edit_form_submit_cancel'));
+    return $form;
+  }
+
+  if (isset($form_state['storage']['ajax']['property']['LotId']) and
+      !in_array($form_state['storage']['ajax']['property']['LotId'],
+		array_keys($lot_options))) {
+    unset($form_state['storage']['ajax']['property']['LotId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['LotId'])) {
+    $form_state['storage']['ajax']['property']['LotId'] = key($lot_options);
+  }
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['LotId']);
+  }
+
+  $lot_id = $form_state['storage']['ajax']['property']['LotId'];
+
+  if (1 < count($property_options) or 1 < count($lot_options)) {
+    $form['ajax']['property']['addbtn'] = array('#type' => 'button', '#value' => t('Add'));
+    $form['ajax']['property']['clearbtn'] = array('#type' => 'button', '#value' => t('Clear'));
+    $form['ajax']['property']['allbtn'] = array('#type' => 'button', '#value' => t('All'));
+    if (!isset($form_state['storage']['ajax']['property']['List'])) {
+      $list = array();
+      $props = chpprop_retrieve_patrollerprops($user->uid, $company_id, $patroller_id);
+      foreach ($props as $propkey => $values) {
+	foreach ($values as $lotkey => $value) {
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+      $form_state['storage']['ajax']['property']['List'] = $list;
+    } else {
+      $list = unserialize($form_state['storage']['ajax']['property']['List']);
+    }
+
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      $list[$property_id][$lot_id] = TRUE;
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $list = array();
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'allbtn') !== FALSE) {
+      foreach ($property_options as $propkey => $propvalue) {
+	foreach ($policies[$propkey] as $lotkey => $lotvalue) {
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+    }
+  } else {
+    $list[$property_id][$lot_id] = TRUE;
+  }
+
+  $form['ajax']['property']['List'] = array('#type' => 'value', '#value' => serialize($list));
+
+  $header = array(t('Property'), t('Lot'));
+  $rows = array();
+  foreach ($list as $property_id => $values) {
+    foreach ($values as $lot_id => $value) {
+      $rows[] = array($property_options[$property_id], $lot_options[$lot_id]);
+    }
+  }
+  $form['ajax']['property']['ListView'] = array('#value' => theme_table($header, $rows));
+
+  // Layout patroller
+  if (!isset($form_state['storage']['ajax']['PatrollerId'])) {
+    $form_state['storage']['ajax']['PatrollerId'] = $patroller_id;
+  }
+  $form['ajax']['PatrollerId'] =
+    array('#type' => 'textfield',
+	  '#title' => PATROLLER_NAME.t(' number'),
+	  '#maxlength' => 8,
+	  '#description' => t('Digits only'),
+	  '#default_value' => $form_state['storage']['ajax']['PatrollerId']);
+
+  // Layout password
+  if (!isset($form_state['storage']['ajax']['Password'])) {
+    $form_state['storage']['ajax']['Password'] = decode_entities($patroller['Password']);
+  }
+  $form['ajax']['Password'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Password'),
+	  '#maxlength' => 16,
+	  '#default_value' => $form_state['storage']['ajax']['Password']);
+
+  // Create session options
+  $options = array();
+  $options['60'] = t('One hour');
+  $options['120'] = t('Two hours');
+  $options['180'] = t('Three hours');
+  $options['240'] = t('Four hours');
+  $options['300'] = t('Five hours');
+  $options['360'] = t('Six hours');
+  $options['420'] = t('Seven hours');
+  $options['480'] = t('Eight hours');
+  $options['540'] = t('Nine hours');
+  $options['600'] = t('Ten hours');
+
+  // Layout session
+  if (!isset($form_state['storage']['ajax']['Session'])) {
+    $form_state['storage']['ajax']['Session'] = $patroller['SessionMinutes'];
+  }
+  $form['ajax']['Session'] =
+    array('#type' => 'select',
+	  '#title' => t('Session timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Session']);
+
+  // Create idle options
+  $options = array();
+  $options['15'] = t('15 minutes');
+  $options['30'] = t('30 minutes');
+  $options['45'] = t('45 minutes');
+  $options['60'] = t('One hour');
+  $options['90'] = t('One hour and 30 minutes');
+  $options['120'] = t('Two hours');
+  $options['150'] = t('Two hours and 30 minutes');
+  $options['180'] = t('Three hours');
+
+  // Layout idle
+  if (!isset($form_state['storage']['ajax']['Idle'])) {
+    $form_state['storage']['ajax']['Idle'] = $patroller['IdleMinutes'];
+  }
+  $form['ajax']['Idle'] =
+    array('#type' => 'select',
+	  '#title' => t('Idle timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Idle']);
+
+  // Create permission options
+  $options = array();
+  $options['Tickets'] = t('Tickets');
+  $options['Boots'] = t('Boots');
+  $options['Towing'] = t('Towing');
+  $options['Whitelist'] = t('Whitelist');
+  $options['Hotlist'] = t('Hotlist');
+  $options['Valet'] = t('Valet');
+
+  $form['ajax']['config'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Permissions'));
+
+  // Layout permissions options
+  if (!isset($form_state['storage']['ajax']['config']['Permissions'])) {
+    $form_state['storage']['ajax']['config']['Permissions'] = array();
+    if ($patroller['Tickets']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Tickets'] = 'Tickets';
+    }
+    if ($patroller['Boots']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Boots'] = 'Boots';
+    }
+    if ($patroller['Towing']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Towing'] = 'Towing';
+    }
+    if ($patroller['Whitelist']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Whitelist'] = 'Whitelist';
+    }
+    if ($patroller['Hotlist']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Hotlist'] = 'Hotlist';
+    }
+    if ($patroller['Valet']) {
+      $form_state['storage']['ajax']['config']['Permissions']['Valet'] = 'Valet';
+    }
+  }
+  $form['ajax']['config']['Permissions'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['config']['Permissions'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Layout enforcer selection
+  if ($form_state['storage']['ajax']['config']['Permissions']['Tickets'] or
+      $form_state['storage']['ajax']['config']['Permissions']['Boots'] or
+      $form_state['storage']['ajax']['config']['Permissions']['Towing']) {
+    $options = array();
+    foreach (chpprop_retrieve_enforcers($user->uid, $company_id) as $enforcer_id => $enforcer) {
+      $options[$enforcer_id] =
+	decode_entities($enforcer['data']['Alias']).', '.
+	decode_entities($enforcer['data']['Street']).', '.
+	decode_entities($enforcer['data']['City']);
+    }
+
+    if (empty($options)) {
+      $form['ajax']['config']['error'] =
+	array('#value' => t('Enforcers yet to be configured, impossible to continue.'));
+      $form['ajax']['cancel'] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	      '#submit' => array('chppat_add_form_submit_cancel'));
+      return $form;
+    }
+
+    if (!isset($form_state['storage']['ajax']['config']['EnforcerId'])) {
+      if (in_array($patroller['EnforcerId'], array_keys($options))) {
+	$form_state['storage']['ajax']['config']['EnforcerId'] = $patroller['EnforcerId'];
+      } else {
+	$form_state['storage']['ajax']['config']['EnforcerId'] = key($options);
+      }
+    }
+    $form['ajax']['config']['EnforcerId'] =
+      array('#type' => 'select',
+	    '#title' => t('Enforcer'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['config']['EnforcerId']);
+  }
+
+  if ($form_state['storage']['ajax']['config']['Permissions']['Tickets']) {
+    // Layout TicketSeed
+    if (!isset($form_state['storage']['ajax']['config']['TicketSeed'])) {
+      $form_state['storage']['ajax']['config']['TicketSeed'] = $patroller['TicketSeed'];
+    }
+    $form['ajax']['config']['TicketSeed'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Unique 4-digit Ticket Number Seed'),
+	    '#maxlength' => 4,
+	    '#default_value' => $form_state['storage']['ajax']['config']['TicketSeed'],
+	    '#description' => t('Will be used by mobile units when creating tickets.<br>'.
+				'Ticket nummer format: YYMMDDSSSSNNNN<br>'.
+				'Where YY=Year, MM=Month, DD=Day, SSSS=Ticket seed, NNNN=Counter'));
+  }
+
+  // Layout person
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['subtag'] = 'person';
+  $settings['subframe'] = TRUE;
+  $settings['subframetitle'] = t('Patroller name');
+  $settings['option']['companynameopt'] = $company_id;
+  $settings['option']['skipnotrequired'] = TRUE;
+  $settings['option']['skipemailnotification'] = TRUE;
+  $settings['default']['PrenameId'] = $patroller['PrenameId'];
+  $settings['default']['FirstName'] = decode_entities($patroller['FirstName']);
+  $settings['default']['MiddleName'] = decode_entities($patroller['MiddleName']);
+  $settings['default']['LastName'] = decode_entities($patroller['LastName']);
+  $settings['default']['SufnameId'] = $patroller['SufnameId'];
+  $settings['default']['Department'] = decode_entities($patroller['Department']);
+  $settings['default']['Title'] = decode_entities($patroller['Title']);
+  $settings['default']['Role'] = decode_entities($patroller['Role']);
+  $settings['default']['Street'] = decode_entities($patroller['Street']);
+  $settings['default']['City'] = decode_entities($patroller['City']);
+  $settings['default']['PostalCode'] = decode_entities($patroller['PostalCode']);
+  $settings['default']['Province'] = $patroller['Province'];
+  $settings['default']['Country'] = $patroller['Country'];
+  $settings['default']['Phone'] = decode_entities($patroller['Phone']);
+  $settings['default']['Email'] = decode_entities($patroller['Email']);
+  chpprop_produce_person($form, $form_state, $settings);
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chppat_add_form_validate_save'),
+	  '#submit' => array('chppat_list_edit_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chppat_list_edit_form_submit_cancel'));
+
+  if (user_access('anai chp delete patrollers')) {
+    $form['ajax']['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+	    '#submit' => array('chppat_list_edit_form_submit_delete'));
+  }
+  return $form;
+}
+
+function chppat_list_edit_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppatlist';
+}
+
+function chppat_list_edit_form_submit_delete($form, &$form_state) {
+  $form_state['storage']['confirm_delete'] = TRUE;
+}
+
+function chppat_list_edit_form_submit_save($form, &$form_state) {
+  global $user;
+  $id = $form_state['storage']['id'];
+  $patroller = chdbprop_get_patroller_id($id);
+  $company_id = $patroller['CompanyId'];
+  $patroller_id = $patroller['PatrollerId'];
+
+  $password = check_plain($form_state['values']['ajax']['Password']);
+
+  // Contact person
+  if (isset($form_state['values']['ajax']['person']['PrenameId']) and
+      $form_state['values']['ajax']['person']['PrenameId'] !== 'BLANK') {
+    $prename_id = $form_state['values']['ajax']['person']['PrenameId'];
+  } else {
+    $prename_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['FirstName'])) {
+    $firstname = check_plain($form_state['values']['ajax']['person']['FirstName']);
+  } else {
+    $firstname = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['MiddleName'])) {
+    $middlename = check_plain($form_state['values']['ajax']['person']['MiddleName']);
+  } else {
+    $middlename = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['LastName'])) {
+    $lastname = check_plain($form_state['values']['ajax']['person']['LastName']);
+  } else {
+    $lastname = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['SufnameId']) and
+      $form_state['values']['ajax']['person']['SufnameId'] !== 'BLANK') {
+    $sufname_id = $form_state['values']['ajax']['person']['SufnameId'];
+  } else {
+    $sufname_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Street'])) {
+    $street = check_plain($form_state['values']['ajax']['person']['Street']);
+  } else {
+    $street = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['City'])) {
+    $city = check_plain($form_state['values']['ajax']['person']['City']);
+  } else {
+    $city = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['PostalCode'])) {
+    $postalcode = check_plain($form_state['values']['ajax']['person']['PostalCode']);
+  } else {
+    $postalcode = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Province'])) {
+    $province = $form_state['values']['ajax']['person']['Province'];
+  } else {
+    $province = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Country'])) {
+    $country = chpprop_retrieve_country($form_state['values']['ajax']['person']['Country']);
+  } else {
+    $country = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Phone'])) {
+    $phone = check_plain($form_state['values']['ajax']['person']['Phone']);
+  } else {
+    $phone = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Email'])) {
+    $email = check_plain($form_state['values']['ajax']['person']['Email']);
+  } else {
+    $email = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Role'])) {
+    $role = check_plain($form_state['values']['ajax']['person']['Role']);
+  } else {
+    $role = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Department'])) {
+    $department = check_plain($form_state['values']['ajax']['person']['Department']);
+  } else {
+    $department = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['person']['Title'])) {
+    $title = check_plain($form_state['values']['ajax']['person']['Title']);
+  } else {
+    $title = NULL;
+  }
+
+  if (isset($form_state['storage']['ajax']['person']['Lat'])) {
+    $lat = $form_state['storage']['ajax']['person']['Lat'];
+  } else {
+    $lat = NULL;
+  }
+
+  if (isset($form_state['storage']['ajax']['person']['Lon'])) {
+    $lon = $form_state['storage']['ajax']['person']['Lon'];
+  } else {
+    $lon = NULL;
+  }
+
+  $session = $form_state['values']['ajax']['Session'];
+  $idle = $form_state['values']['ajax']['Idle'];
+
+  $tickets = $form_state['values']['ajax']['config']['Permissions']['Tickets'];
+  $boots = $form_state['values']['ajax']['config']['Permissions']['Boots'];
+  $towing = $form_state['values']['ajax']['config']['Permissions']['Towing'];
+  $whitelist = $form_state['values']['ajax']['config']['Permissions']['Whitelist'];
+  $hotlist = $form_state['values']['ajax']['config']['Permissions']['Hotlist'];
+  $valet = $form_state['values']['ajax']['config']['Permissions']['Valet'];
+
+  if (isset($form_state['values']['ajax']['config']['EnforcerId'])) {
+    $enforcer_id = $form_state['values']['ajax']['config']['EnforcerId'];
+  } else {
+    $enforcer_id = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['config']['TicketSeed'])) {
+    $ticket_seed = $form_state['values']['ajax']['config']['TicketSeed'];
+  } else {
+    $ticket_seed = NULL;
+  }
+
+  $suspended = $form_state['values']['Suspended'];
+
+  if (chdbprop_update_patroller
+      ($id, $password, $lat, $lon,
+       $prename_id, $firstname, $middlename, $lastname, $sufname_id,
+       $street, $city, $postalcode, $province, $country,
+       $phone, $email,
+       $role, $department, $title,
+       $session, $idle,
+       $tickets, $boots, $towing, $whitelist, $hotlist, $valet,
+       $enforcer_id, $ticket_seed)) {
+    drupal_set_message('Could not update patroller', 'error');
+    return;
+  }
+
+  if (chdbprop_update_patroller_status
+      ($id,
+       $suspended)) {
+    drupal_set_message('Could not update agent status', 'error');
+    return;
+  }
+
+  if (chdbprop_insert_agentpoll_patroller
+      ($company_id, $patroller_id)) {
+    drupal_set_message('Could not insert poll', 'error');
+    return;
+  }
+
+  $list = unserialize($form_state['values']['ajax']['property']['List']);
+
+  // Delete property assignments for those not in new list
+  $props = chpprop_retrieve_patrollerprops($user->uid, $company_id, $patroller_id);
+
+  foreach ($props as $propkey => $values) {
+    foreach ($values as $lotkey => $value) {
+      if (isset($list[$propkey][$lotkey])) {
+	// Mark as not needing insertion
+	$list[$propkey][$lotkey] = FALSE;
+      } else {
+	if (chdbprop_delete_patrollerprop
+	    ($company_id, $patroller_id,
+	     $propkey, $lotkey)) {
+	  drupal_set_message('Could not delete from property/lot', 'error');
+	  return;
+	}
+      }
+    }
+  }
+
+  // Insert new assigned properties
+  if (!empty($list)) {
+    foreach ($list as $propkey => $values) {
+      foreach ($values as $lotkey => $value) {
+	if ($value) {
+	  if (chdbprop_insert_patrollerprop
+	      ($company_id, $patroller_id,
+	       $propkey, $lotkey,
+	       $id)) {
+	    drupal_set_message('Could not attach to property/lot', 'error');
+	    return;
+	  }
+	}
+      }
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chppatlist';
+}
+
+function chppat_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    $patroller = chdbprop_get_patroller_id($id);
+
+    if (chdbprop_insert_agentpoll_patroller
+	($patroller['CompanyId'],
+	 $patroller['PatrollerId'])) {
+      drupal_set_message('Could not insert poll', 'error');
+      return;
+    }
+
+    if (chdbprop_delete_patroller_id($id)) {
+      drupal_set_message('Could not delete patroller', 'error');
+      return;
+    }
+
+    if (chdbprop_delete_patrollerprops
+	($patroller['CompanyId'],
+	 $patroller['PatrollerId'])) {
+      drupal_set_message('Could not delete from property', 'error');
+      return;
+    }
+    
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['patroller_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+

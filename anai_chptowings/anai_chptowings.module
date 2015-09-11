@@ -1,0 +1,950 @@
+<?php
+// $Id$
+require_once("anai_chptowings.inc");
+
+
+/**
+ * @file
+ * ANAI CHP Towings
+ *
+ * Towing management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chptowings_perm() {
+  return array('anai chp add towings',
+	       'anai chp copy manual towings',
+	       'anai chp list towings',
+	       'anai chp edit towings',
+	       'anai chp delete towings');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chptowings_theme($existing, $type, $theme, $path) {
+  return array
+    ('chptow_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chptowings_menu() {
+  $items = array();
+  $items['chptowadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptow_add_form'),
+     'access arguments' => array('anai chp add towings'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptowcopy'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptow_copy_form'),
+     'access arguments' => array('anai chp copy manual towings'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptowlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptow_list_form'),
+     'access arguments' => array('anai chp list towings'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**********
+ ********** Towings add
+ ********** Address: chptowadd
+ ********** Access:  'anai chp add towings'
+ *********/
+
+
+
+function chptow_add_form($form_state) {
+  if (isset($form_state['storage']['confirm'])) {
+    return confirm_form($form, 'Are you sure?', 'chpticklist',
+			t('Vehicle LPN already got a ticket in last 24 hours.',
+			  array('LPN' => $form_state['storage']['LPN'])));
+  }
+
+  drupal_set_title(t('Add new towing report'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+
+  $patrollers = array();
+  foreach (chdbpatrol_get_patrollers($company_id) as $patroller) {
+    $patroller_id = $patroller['PatrollerId'];
+    $patrollers[$patroller_id] = $patroller_id;
+  }
+  if (sizeof($patrollers) == 0) {
+    $form['property']['emptypatrollers'] =
+      array('#value' => t('Empty. You must register patrollers first.'));
+    return $form;
+  }
+
+  if (!isset($form_state['storage']['property']['PatrollerId'])) {
+    $form_state['storage']['property']['PatrollerId'] = key($patrollers);
+  }
+  $patroller_id = $form_state['storage']['property']['PatrollerId'];
+  $form['property']['PatrollerId'] =
+    array('#type' => 'select',
+	  '#title' => t('Employee'),
+	  '#options' => $patrollers,
+	  '#default_value' => $patroller_id);
+
+  if (!isset($form_state['storage']['property']['Code'])) {
+    $form_state['storage']['property']['Code'] = '';
+  }
+  $form['property']['Code'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Reason code'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['property']['Code']);
+
+  if (!isset($form_state['storage']['property']['Description'])) {
+    $form_state['storage']['property']['Description'] = '';
+  }
+  $form['property']['Description'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Reason description'),
+	  '#maxlength' => 80,
+	  '#default_value' => $form_state['storage']['property']['Description']);
+
+  if (!isset($form_state['storage']['property']['VIN'])) {
+    $form_state['storage']['property']['VIN'] = '';
+  }
+  $form['property']['VIN'] =
+    array('#type' => 'textfield',
+	  '#title' => t('VIN'),
+	  '#maxlength' => 60,
+	  '#default_value' => $form_state['storage']['property']['VIN']);
+
+  if (chpprop_produce_vehicle(&$form, &$form_state)) {
+    return $form;
+  }
+
+  if (!isset($form_state['storage']['property']['Comment'])) {
+    $form_state['storage']['property']['Comment'] = '';
+  }
+  $form['property']['Comment'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Comment'),
+	  '#maxlength' => 300,
+	  '#default_value' => $form_state['storage']['property']['Comment']);
+
+  if (!isset($form_state['storage']['property']['Operator'])) {
+    $form_state['storage']['property']['Operator'] = '';
+  }
+  $form['property']['Operator'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Towing operator/company'),
+	  '#maxlength' => 80,
+	  '#default_value' => $form_state['storage']['property']['Operator']);
+
+  $form['property']['submit'] =
+    array('#type' => 'submit', '#value' => t('Save'),
+	  '#validate' => array('chptow_add_form_validate_save'),
+	  '#submit' => array('chptow_add_form_submit'));
+
+  $form['property']['back'] =
+    array('#type' => 'submit', '#value' => t('Cancel'),
+	  '#validate' => array('chptow_add_form_validate_back'),
+	  '#submit' => array('chptow_add_form_submit'));
+
+  return $form;
+}
+
+function chptow_add_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chptow_add_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['property']['Code'])) {
+    form_set_error('property][Code', 'Reason code field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Description'])) {
+    form_set_error('property][Description', 'Reason description field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['VIN'])) {
+    form_set_error('property][VIN', 'VIN field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['LPN'])) {
+    form_set_error('property][LPN', 'License plate number field is required.');
+    return;
+  }
+  if (preg_match('/\s/', $form_state['values']['property']['LPN'])) {
+    form_set_error('property][LPN',
+		   'License plate number shall be given without any spaces');
+    return;
+  }
+  if (empty($form_state['values']['property']['Model'])) {
+    form_set_error('property][Model', 'Model field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Color'])) {
+    form_set_error('property][Color', 'Color field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Operator'])) {
+    form_set_error('property][Operator', 'Towing operator/company field is required.');
+    return;
+  }
+
+  $datetime1 = chpuser_datetime_utc_to_utc('now');
+  $datetime1->modify('-1 day');
+
+  $entries = chdbtow_get_towings_lpn
+    ($form_state['values']['property']['CompanyId'],
+     $form_state['values']['LPN'],
+     $datetime1->format("Y-m-d H:i:s"));
+  if (sizeof($entries) > 0) {
+    form_set_error('LPN', 'License plate already towed last 24 hours');
+    return;
+  }
+
+  $form_state['storage']['LPN'] = strtoupper($form_state['values']['property']['LPN']);
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chptow_add_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    $company_id = $form_state['storage']['property']['CompanyId'];
+    $property_id = $form_state['storage']['property']['PropertyId'];
+    $lot_id = $form_state['storage']['property']['LotId'];
+    global $user;
+
+    $counters = chdbtow_get_all_counters($company_id);
+
+    if (sizeof($counters) == 0) {
+      if (chdbtow_insert_new_counter
+	  ($company_id,
+	   $id)) {
+	drupal_set_message('Could not insert towing counters', 'error');
+	return;
+      }
+
+      $counters = chdbtow_get_all_counters($company_id);
+
+      if ($counters[0]['TowingIdCounter'] < 1000) {
+	if (chdbtow_modify_counter($counters[0]['Id'], 1000)) {
+	  drupal_set_message('Could not modify towing counter', 'error');
+	  return;
+	}
+
+	$counters = chdbtow_get_all_counters($company_id);
+      }
+    }
+    if (chdbtow_insert_new_towing
+	($company_id,
+	 $form_state['values']['property']['PatrollerId'],
+	 $counters[0]['TowingIdCounter'],
+	 $property_id,
+	 $lot_id,
+	 $form_state['values']['property']['Code'],
+	 $form_state['values']['property']['Description'],
+	 $form_state['values']['property']['VIN'],
+	 $form_state['storage']['LPN'],
+	 $form_state['values']['property']['Make'],
+	 $form_state['values']['property']['Model'],
+	 $form_state['values']['property']['Color'],
+	 $form_state['values']['property']['Comment'],
+	 $form_state['values']['property']['Operator'],
+	 $user->name,
+	 $id)) {
+      drupal_set_message('Could not insert new towing', 'error');
+      return;
+    }
+
+    if (chdbtow_update_counter($counters[0]['Id'])) {
+      drupal_set_message('Could not update towing counter', 'error');
+      return;
+    }
+
+    $freq_user = chdbprop_get_freq_user($form_state['storage']['LPN']);
+    if (sizeof($freq_user) == 0) {
+      if (chdbprop_insert_freq_user
+	  ($property_id,
+	   $form_state['storage']['LPN'],
+	   $form_state['values']['property']['Make'],
+	   $form_state['values']['property']['Model'],
+	   $form_state['values']['property']['Color'])) {
+	drupal_set_message('Could not insert freq user', 'error');
+	return;
+      }
+    } else {
+      if (chdbprop_update_freq_user
+	  ($property_id,
+	   $form_state['storage']['LPN'],
+	   $form_state['values']['property']['Make'],
+	   $form_state['values']['property']['Model'],
+	   $form_state['values']['property']['Color'])) {
+	drupal_set_message('Could not update freq user', 'error');
+	return;
+      }
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Towings copy
+ ********** Address: chptowcopy
+ ********** Access:  'anai chp copy manual towings'
+ *********/
+
+
+
+function chptow_copy_form($form_state) {
+  drupal_set_title(t('Copy manual towing report'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+
+  $patrollers = array();
+  foreach (chdbpatrol_get_patrollers($company_id) as $patroller) {
+    $patrollers[$patroller['PatrollerId']] = $patroller['PatrollerId'];
+  }
+
+  if (!isset($form_state['storage']['property']['PatrollerId'])) {
+    $form_state['storage']['property']['PatrollerId'] = '';
+  }
+  $form['property']['PatrollerId'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Employee number'),
+	  '#maxlength' => 8,
+	  '#default_value' => $form_state['storage']['property']['PatrollerId'],
+	  '#description' => t('Digits only'));
+
+  drupal_add_js
+    ('$(function() {
+      	$("#edit-property-CreateTime").AnyTime_picker({
+          format:"%Y-%m-%d %H:%i:%s",
+          hideInput:true,placement:"inline",askSecond:false
+        });
+     })',
+     'inline');
+
+  $form['property']['CreateTime'] = array('#type' => 'textfield');
+
+  if (!isset($form_state['storage']['property']['TowingId'])) {
+    $form_state['storage']['property']['TowingId'] = '';
+  }
+  $form['property']['TowingId'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Towing id'),
+	  '#maxlength' => 40,
+	  '#default_value' => $form_state['storage']['property']['TowingId']);
+
+  if (!isset($form_state['storage']['property']['Code'])) {
+    $form_state['storage']['property']['Code'] = '';
+  }
+  $form['property']['Code'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Reason code'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['property']['Code']);
+
+  if (!isset($form_state['storage']['property']['Description'])) {
+    $form_state['storage']['property']['Description'] = '';
+  }
+  $form['property']['Description'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Reason description'),
+	  '#maxlength' => 80,
+	  '#default_value' => $form_state['storage']['property']['Description']);
+
+  if (!isset($form_state['storage']['property']['VIN'])) {
+    $form_state['storage']['property']['VIN'] = '';
+  }
+  $form['property']['VIN'] =
+    array('#type' => 'textfield',
+	  '#title' => t('VIN'),
+	  '#maxlength' => 60,
+	  '#default_value' => $form_state['storage']['property']['VIN']);
+
+  // Build makes select
+  $makes = array();
+  foreach (chdbadmin_get_all_makes('Make') as $make) {
+    $makes[$make['Make']] = $make['Make'];
+  }
+  if (sizeof($makes) == 0) {
+    $form['property']['emptymakes'] =
+      array('#value' => t('System is missing Make definitions.'));
+    return 1;
+  }
+
+  // Layout LPN
+  if (!isset($form_state['storage']['property']['LPN'])) {
+    $form_state['storage']['property']['LPN'] = '';
+  }
+  $form['property']['LPN'] =
+    array('#type' => 'textfield',
+	  '#title' => t('License Plate Number'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['property']['LPN'],
+	  '#attributes' => array('onBlur'=>'this.value=this.value.toUpperCase()'),
+	  '#description' => '(No spaces)');
+
+  // Layout make
+  if (!isset($form_state['storage']['property']['Make'])) {
+    $form_state['storage']['property']['Make'] = key($makes);
+  }
+  $form['property']['Make'] =
+    array('#type' => 'select',
+	  '#title' => t('Make'),
+	  '#options' => $makes,
+	  '#default_value' => $form_state['storage']['property']['Make']);
+
+  // Layout model
+  if (!isset($form_state['storage']['property']['Model'])) {
+    $form_state['storage']['property']['Model'] = '';
+  }
+  $form['property']['Model'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Model'),
+	  '#maxlength' => 40,
+	  '#default_value' => $form_state['storage']['property']['Model']);
+
+  // Layout color
+  if (!isset($form_state['storage']['property']['Color'])) {
+    $form_state['storage']['property']['Color'] = '';
+  }
+  $form['property']['Color'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Color'),
+	  '#maxlength' => 30,
+	  '#default_value' => $form_state['storage']['property']['Color']);
+
+  if (!isset($form_state['storage']['property']['Comment'])) {
+    $form_state['storage']['property']['Comment'] = '';
+  }
+  $form['property']['Comment'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Comment'),
+	  '#maxlength' => 300,
+	  '#default_value' => $form_state['storage']['property']['Comment']);
+
+  if (!isset($form_state['storage']['property']['Operator'])) {
+    $form_state['storage']['property']['Operator'] = '';
+  }
+  $form['property']['Operator'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Towing operator/company'),
+	  '#maxlength' => 80,
+	  '#default_value' => $form_state['storage']['property']['Operator']);
+
+  $form['property']['submit'] =
+    array('#type' => 'submit', '#value' => t('Save'),
+	  '#validate' => array('chptow_copy_form_validate_save'),
+	  '#submit' => array('chptow_copy_form_submit'));
+
+  $form['property']['back'] =
+    array('#type' => 'submit', '#value' => t('Cancel'),
+	  '#validate' => array('chptow_copy_form_validate_back'),
+	  '#submit' => array('chptow_copy_form_submit'));
+
+  return $form;
+}
+
+function chptow_copy_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['property']['CreateTime'])) {
+    form_set_error('property][CreateTime', 'Time field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['TowingId'])) {
+    form_set_error('property][TowingId', t('Towing id field is required.'));
+    return;
+  }
+  if (is_numeric($form_state['values']['property']['TowingId'])) {
+    form_set_error('property][TowingId', 'Towing id can\'t be only digits. Add a prefix, for example M-'.$form_state['values']['TowingId']);
+    return;
+  }
+  if (chdbtow_towing_exists
+      ($form_state['values']['property']['CompanyId'],
+       $form_state['values']['property']['TowingId'])) {
+    form_set_error('property][TowingId', 'Towing id is already registered.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Code'])) {
+    form_set_error('property][Code', 'Reason code field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Description'])) {
+    form_set_error('property][Description', 'Reason description field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['VIN'])) {
+    form_set_error('property][VIN', 'VIN field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['LPN'])) {
+    form_set_error('property][LPN', 'License plate number field is required.');
+    return;
+  }
+  if (preg_match('/\s/', $form_state['values']['property']['LPN'])) {
+    form_set_error('property][LPN',
+		   'License plate number shall be given without any spaces');
+    return;
+  }
+  if (empty($form_state['values']['property']['Model'])) {
+    form_set_error('property][Model', 'Model field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Color'])) {
+    form_set_error('property][Color', 'Color field is required.');
+    return;
+  }
+  if (empty($form_state['values']['property']['Operator'])) {
+    form_set_error('property][Operator', 'Towing operator/company field is required.');
+    return;
+  }
+
+  $datetime1 = chpuser_datetime_utc_to_utc('now');
+  $datetime1->modify('-1 day');
+
+  $entries = chdbtow_get_towings_lpn
+    ($form_state['values']['property']['CompanyId'],
+     $form_state['values']['LPN'],
+     $datetime1->format("Y-m-d H:i:s"));
+  if (sizeof($entries) > 0) {
+    form_set_error('property][LPN', 'License plate already towed last 24 hours');
+    return;
+  }
+
+  $form_state['storage']['LPN'] = strtoupper($form_state['values']['property']['LPN']);
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chptow_copy_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chptow_copy_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    $company_id = $form_state['storage']['property']['CompanyId'];
+    $property_id = $form_state['storage']['property']['PropertyId'];
+    $lot_id = $form_state['storage']['property']['LotId'];
+    global $user;
+
+    $created = chpuser_datetime_usertimezone_to_utc
+      ($form_state['values']['property']['CreateTime']);
+
+    if (chdbtow_insert_new_towing
+	($company_id,
+	 $form_state['values']['property']['PatrollerId'],
+	 $form_state['values']['property']['TowingId'],
+	 $property_id,
+	 $lot_id,
+	 $form_state['values']['property']['Code'],
+	 $form_state['values']['property']['Description'],
+	 $form_state['values']['property']['VIN'],
+	 $form_state['storage']['LPN'],
+	 $form_state['values']['property']['Make'],
+	 $form_state['values']['property']['Model'],
+	 $form_state['values']['property']['Color'],
+	 $form_state['values']['property']['Comment'],
+	 $form_state['values']['property']['Operator'],
+	 $user->name,
+	 $id,
+	 $created->format("Y-m-d H:i:s"))) {
+      drupal_set_message('Could not insert new towing', 'error');
+      return;
+    }
+
+    $freq_user = chdbprop_get_freq_user($form_state['storage']['LPN']);
+    if (sizeof($freq_user) == 0) {
+      if (chdbprop_insert_freq_user
+	  ($property_id,
+	   $form_state['storage']['LPN'],
+	   $form_state['values']['property']['Make'],
+	   $form_state['values']['property']['Model'],
+	   $form_state['values']['property']['Color'])) {
+	drupal_set_message('Could not insert freq user', 'error');
+	return;
+      }
+    } else {
+      if (chdbprop_update_freq_user
+	  ($property_id,
+	   $form_state['storage']['LPN'],
+	   $form_state['values']['property']['Make'],
+	   $form_state['values']['property']['Model'],
+	   $form_state['values']['property']['Color'])) {
+	drupal_set_message('Could not update freq user', 'error');
+	return;
+      }
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Towings list
+ ********** Address: chptowlist
+ ********** Access:  'anai chp list towings'
+ *********/
+
+
+
+function chptow_list_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form($form, 'Are you sure?', 'chptowlist',
+			'The towing report will be deleted from the system.');
+  }
+
+  if ($form_state['storage']['detailed_edit']) {
+    unset($form_state['storage']['detailed_edit']);
+    return chptow_list_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Towing reports'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['show_all_lots'] = FALSE; // Default value
+  if (user_access('anai chp add towings')) {
+    $settings['buttons']['add']['title'] = t('Add new towing');
+    $settings['buttons']['add']['validate'] = 'chptow_list_form_validate_add';
+    $settings['buttons']['add']['submit'] = 'chptow_list_form_submit';
+  }
+  if (user_access('anai chp copy manual towings')) {
+    $settings['buttons']['copy']['title'] = t('Copy manual towing');
+    $settings['buttons']['copy']['validate'] = 'chptow_list_form_validate_copy';
+    $settings['buttons']['copy']['submit'] = 'chptow_list_form_submit';
+  }
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['validate'] = 'chptow_list_form_validate_back';
+  $settings['buttons']['back']['submit'] = 'chptow_list_form_submit';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+  $all_lots = $form_state['storage']['property']['all_lots'];
+
+  $towings = chdbtow_get_towings($company_id, $property_id,
+				 !$all_lots, $lot_id);
+
+  if (sizeof($towings) == 0) {
+    $form['property']['empty'] =
+      array('#value' => '<p>'.t('Empty. No towing reports registered.').'<p>');
+  } else {
+    $form['property']['list'] = chptow_list_table_form($towings);
+  }
+
+  return $form;
+}
+
+function chptow_list_form_validate_add($form, &$form_state) {
+  $form_state['storage']['add'] = TRUE;
+}
+
+function chptow_list_form_validate_copy($form, &$form_state) {
+  $form_state['storage']['copy'] = TRUE;
+}
+
+function chptow_list_form_validate_back($form, &$form_state) {
+  $form_state['storage']['home'] = TRUE;
+}
+
+function chptow_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chptow_list_table');
+  if (user_access('anai chp edit towings')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $towing_id => $entry) {
+    $form['db']['idd_'.$looper] =
+      array('#type' => 'hidden', '#value' => $entry['Id']);
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    $form['db']['towid_'.$looper] =
+      array('#value' => $entry['TowingId']);
+
+    $form['db']['vin_'.$looper] =
+      array('#value' => $entry['VIN']);
+
+    $form['db']['lpn_'.$looper] =
+      array('#value' => $entry['LPN']);
+
+    $form['db']['operator_'.$looper] =
+      array('#value' => $entry['Operator']);
+
+    $form['db']['reason_'.$looper] =
+      array('#value' => '['.$entry['Code'].']<br>'.$entry['Description']);
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'submit',
+	      '#value' => t('Edit'),
+	      '#name' => 'op_edit'.$entry['Id'],
+	      '#submit' => array('chptow_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chptow_list_table($form) {
+  // Table Header
+  $header = array('Created', 'Id', 'VIN', 'LPN', 'Operator', 'Reason', '');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'time_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('time_'));
+    $rows[] = array(drupal_render($form['time_'.$looper]),
+		    drupal_render($form['towid_'.$looper]),
+		    drupal_render($form['vin_'.$looper]),
+		    drupal_render($form['lpn_'.$looper]),
+		    drupal_render($form['operator_'.$looper]),
+		    drupal_render($form['reason_'.$looper]),
+		    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chptow_list_edit_form($form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $towing = chdbtow_get_towing_id($id);
+
+  drupal_set_title(t('Towing report TOW', array('TOW' => $towing['TowingId'])));
+
+  $header = array();
+  $created = chpuser_datetime_utc_to_usertimezone($towing['CreateTime']);
+  $rows[] = array(t('Created'), $created->format("D, j M Y H:i"));
+  $rows[] = array(t('Patroller'), $towing['PatrollerId']);
+  $rows[] = array(t('Violation code'), $towing['Code']);
+  $rows[] = array(t('Violation description'), $towing['Description']);
+  $rows[] = array(t('VIN'), $towing['VIN']);
+  $rows[] = array(t('License Plate'), $towing['LPN']);
+  $rows[] = array(t('Make'), $towing['Make']);
+  $rows[] = array(t('Model'), $towing['Model']);
+  $rows[] = array(t('Color'), $towing['Color']);
+  $rows[] = array(t('Comment'), $towing['Comment']);
+  $rows[] = array(t('Operator'), $towing['Operator']);
+  $form['chp']['pop'] = array('#value' => theme_table($header, $rows));
+
+  $submit_needed = FALSE;
+
+  $form['chp']['active'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('Incident for towing report has ended'));
+
+  $form['save'] =
+    array('#type' => 'submit',
+  	  '#value' => t('Save'),
+  	  '#validate' => array('chptow_list_edit_form_validate_save'));
+  $form['back'] =
+    array('#type' => 'submit',
+  	  '#value' => t('Cancel'),
+  	  '#validate' => array('chptow_list_edit_form_validate_back'));
+  if (user_access('anai chp delete towings')) {
+    $form['delete'] =
+      array('#type' => 'submit',
+  	    '#value' => t('Delete towing'),
+  	    '#validate' => array('chptow_list_edit_form_validate_delete'));
+  }
+  return $form;
+}
+
+function chptow_list_edit_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chptow_list_edit_form_validate_save($form, &$form_state) {
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chptow_list_edit_form_validate_delete($form, &$form_state) {
+  $form_state['storage']['delete'] = TRUE;
+}
+
+function chptow_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+  if ($form_state['storage']['add']) {
+    $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+    $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+    $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowadd';
+    return;
+  }
+  if ($form_state['storage']['copy']) {
+    $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+    $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+    $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowcopy';
+    return;
+  }
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    if (chdbtow_delete_towing_id($id)) {
+      drupal_set_message('Could not delete towing', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+  if ($form_state['storage']['delete']) {
+    unset($form_state['storage']['delete']);
+    $form_state['storage']['confirm_delete'] = TRUE;
+    return;
+  }
+  if ($form_state['storage']['save']) {
+    $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+    global $user;
+    if (chdbtow_update_towing_id($id)) {
+      drupal_set_message('Could not update towing', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+
+

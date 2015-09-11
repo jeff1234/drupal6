@@ -1,0 +1,10 @@
+name = RoleAssign
+description = Allows site administrators to further delegate the task of managing user's roles.
+core = 6.x
+
+; Information added by drupal.org packaging script on 2011-08-10
+version = "6.x-1.0"
+core = "6.x"
+project = "roleassign"
+datestamp = "1313015219"
+

@@ -1,0 +1,1721 @@
+<?php
+require_once("anai_chplane_db.inc");
+
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * ANAI Cloud computing main module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+function anai_chplane_cron() {
+  // Loop through all users and act per schedule
+  foreach (chdbprop_get_all_lanecountopt() as $value) {
+    $account = user_load(array('uid' => $value['UID']));
+    $now = chpuser_datetime_utc_to_usertimezone('now', $account->timezone);
+
+    if ($value['Scheme'] === 'None') {
+      continue;
+    }
+
+    if (0 != $now->format("H")) {
+      // Not midnight
+      continue;
+    }
+
+    if ($value['Scheme'] === 'Monday' and $now->format("N") != 1) {
+      // Not Monday
+      continue;
+    }
+
+    if (chplane_snapshot_counters($value['UID'], $value['PropertyId'])) {
+      watchdog('anai_chplane',
+	       'snapshot_counters('.$now->format("Y-m-d H:i:s").') failed');
+      return;
+    }
+  }
+}
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chplane_perm() {
+  return array('anai chp add lanes',
+	       'anai chp list lanes',
+	       'anai chp edit lanes',
+	       'anai chp delete lanes',
+	       'anai chp options lanes',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chplane_theme($existing, $type, $theme, $path) {
+  return array
+    ('chplane_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chplane_cluster_select_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chplane_menu() {
+  $items = array();
+  $items['chplaneadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chplane_add_form'),
+     'access arguments' => array('anai chp add lanes'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chplane'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chplane_list_form'),
+     'access arguments' => array('anai chp list lanes'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chplaneopt'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chplane_options_form'),
+     'access arguments' => array('anai chp options lanes'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+function chplane_menu_text($tag) {
+  switch ($tag) {
+  case 'NoGateNoLPR':
+    return t('No automated lane control');
+  case 'NoGateTrigger':
+    return t('No gate, register vehicles at trigger');
+  case 'NoGateFreeflow':
+    return t('No gate, register vehicles in motion');
+  case 'GateTrigger':
+    return t('Gate, register vehicles at trigger');
+  case 'GateFreeflow':
+    return t('Gate, register vehicles in motion');
+  /* case 'GatePay': */
+  /*   return t('Gate, open when paid at pay station'); */
+  case 'Whitelist':
+    return t('Restrict to permit holders only');
+  case 'Hotlist':
+    return t('Deny hot-listed vehicles');
+  case 'EntryCorrector':
+    return t('Correction of scanned plate');
+  case 'ExitCorrector':
+    return t('Correction of scanned plate');
+  /* case 'EntryTicket': */
+  /*   return t('Grab ticket'); */
+  /* case 'ExitTicket': */
+  /*   return t('Pay ticket'); */
+  case 'Midnight':
+    return t('');
+  }
+  return 'Unknown';
+}
+
+
+
+/**********
+ ********** Add lane
+ ********** Address: chplaneadd
+ ********** Access:  'anai chp add lanes
+ *********/
+
+
+
+function chplane_add_form($form_state) {
+  drupal_set_title(t('Add lane'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_properties'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+
+  if (isset($form_state['storage']['ajax']['property']['List']) and
+      $form_state['storage']['ajax']['PropertyChanged']) {
+    unset($form_state['storage']['ajax']['property']['List']);
+  }
+
+  // Create property options
+  $property_options = array();
+  $property_options[$property_id] =
+    decode_entities($form_state['storage']['ajax']['Properties'][$property_id]['data']['Alias']).', '.
+    decode_entities($form_state['storage']['ajax']['Properties'][$property_id]['data']['Street']).', '.
+    decode_entities($form_state['storage']['ajax']['Properties'][$property_id]['data']['City']);
+
+  // Create and validate policies options, used later for lot selection
+  $policies = chpprop_retrieve_policies($user->uid);
+  if (empty($policies)) {
+    $form['ajax']['error'] = array('#value' => '<p>'.t('Lot missing.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chplane_add_form_submit_cancel'));
+    return $form;
+  }
+
+  // Property/Lot selector
+  $form['ajax']['property'] = array('#type' => 'fieldset', '#title' => t('Assignment'));
+
+  // Create and validate lot options based on selected property
+  $lot_options = array();
+  if (isset($policies[$property_id])) {
+    foreach ($policies[$property_id] as $lot_id => $policy) {
+      if (empty($policy['data']['EquipmentId'])) {
+	continue;
+      }
+      // TBD also check Equipment for LPR
+      $lot_options[$lot_id] = decode_entities($policy['data']['Alias']);
+    }
+  }
+  if (empty($lot_options)) {
+    $form['ajax']['property']['error'] = array('#value' => '<p>'.t('Equipment policy missing on lot.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chplane_add_form_submit_cancel'));
+
+    return $form;
+  }
+
+  // Layout lot options
+  if (isset($form_state['storage']['ajax']['property']['LotId']) and
+      !in_array($form_state['storage']['ajax']['property']['LotId'],
+		array_keys($lot_options))) {
+    unset($form_state['storage']['ajax']['property']['LotId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['LotId'])) {
+    $form_state['storage']['ajax']['property']['LotId'] = key($lot_options);
+  }
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['LotId']);
+  }
+
+  $lot_id = $form_state['storage']['ajax']['property']['LotId'];
+
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['addbtn'] = array('#type' => 'button', '#value' => t('Add'));
+    $form['ajax']['property']['clearbtn'] = array('#type' => 'button', '#value' => t('Clear'));
+    $form['ajax']['property']['allbtn'] = array('#type' => 'button', '#value' => t('All'));
+    if (!isset($form_state['storage']['ajax']['property']['List'])) {
+      $list = array();
+      $form_state['storage']['ajax']['property']['List'] = $list;
+    } else {
+      $list = unserialize($form_state['storage']['ajax']['property']['List']);
+    }
+
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      $list[$property_id][$lot_id] = TRUE;
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $list = array();
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'allbtn') !== FALSE) {
+      foreach ($property_options as $propkey => $propvalue) {
+	foreach ($policies[$propkey] as $lotkey => $policy) {
+	  if (empty($policy['data']['EquipmentId'])) {
+	    continue;
+	  }
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+    }
+  } else {
+    $list[$property_id][$lot_id] = TRUE;
+  }
+
+  $form['ajax']['property']['List'] = array('#type' => 'value', '#value' => serialize($list));
+
+  $header = array(t('Property'), t('Lot'));
+  $rows = array();
+  foreach ($list as $property_id => $values) {
+    foreach ($values as $lot_id => $value) {
+      $rows[] = array($property_options[$property_id], $lot_options[$lot_id]);
+    }
+  }
+  $form['ajax']['property']['ListView'] = array('#value' => theme_table($header, $rows));
+
+  // Create apps options
+  $app_options = array();
+  $apps = array();
+  foreach (chdbprop_get_all_apps() as $app) {
+    if ($app['SecureparkPolicy'] or $app['VideoparkPolicy']) {
+      $app_options[$app['AppId']] = decode_entities($app['Alias']);
+      $apps[$app['AppId']] = array('Securepark' => $app['SecureparkPolicy'] ? TRUE : FALSE,
+				   'Videopark' => $app['VideoparkPolicy'] ? TRUE : FALSE);
+    }
+  }
+
+  // Layout Alias
+  if (!isset($form_state['storage']['ajax']['Alias'])) {
+    $form_state['storage']['ajax']['Alias'] = '';
+  }
+  $form['ajax']['Alias'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Lane name'),
+	  '#maxlength' => 30,
+	  '#default_value' => $form_state['storage']['ajax']['Alias']);
+
+  // Layout direction
+  $options = array();
+  $options['Entry'] = t('Entry');
+  $options['Exit'] = t('Exit');
+  $options['EntryExit'] = t('Both');
+  if (!isset($form_state['storage']['ajax']['Direction'])) {
+    $form_state['storage']['ajax']['Direction'] = key($options);
+  }
+  $form['ajax']['Direction'] =
+    array('#type' => 'radios',
+	  '#title' => t('Direction'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Direction'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Layout Entry direction
+  if ($form_state['storage']['ajax']['Direction'] === 'Entry' or
+      $form_state['storage']['ajax']['Direction'] === 'EntryExit') {
+
+    $form['ajax']['Entry'] = array('#type' => 'fieldset', '#title' => t('Entry settings'));
+
+    // Layout entry gate
+    $options = array();
+    $options['NoGateNoLPR'] = chplane_menu_text('NoGateNoLPR');
+    $options['NoGateTrigger'] = chplane_menu_text('NoGateTrigger');
+    $options['NoGateFreeflow'] = chplane_menu_text('NoGateFreeflow');
+    $options['GateTrigger'] = chplane_menu_text('GateTrigger');
+    $options['GateFreeflow'] = chplane_menu_text('GateFreeflow');
+    if (!isset($form_state['storage']['ajax']['Entry']['Gate'])) {
+      $form_state['storage']['ajax']['Entry']['Gate'] = key($options);
+    }
+    $form['ajax']['Entry']['Gate'] =
+      array('#type' => 'radios',
+	    '#title' => t('Gate automation'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Entry']['Gate'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    // Layout value added when athorization is used
+    //if ($form_state['storage']['ajax']['Entry']['Gate'] === 'GateAuth') {
+    if ($form_state['storage']['ajax']['Entry']['Gate'] === 'GateTrigger' or
+	$form_state['storage']['ajax']['Entry']['Gate'] === 'GateFreeflow') {
+      $options = array();
+      $options['Whitelist'] = chplane_menu_text('Whitelist');
+      $options['Hotlist'] = chplane_menu_text('Hotlist');
+      //$options['EntryTicket'] = chplane_menu_text('EntryTicket');
+      $options['EntryCorrector'] = chplane_menu_text('EntryCorrector');
+      if (!isset($form_state['storage']['ajax']['Entry']['EntryStation'])) {
+	$form_state['storage']['ajax']['Entry']['EntryStation'] = array();
+      }
+      $form['ajax']['Entry']['EntryStation'] =
+	array('#type' => 'checkboxes',
+	      '#title' => t('Entry station'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['Entry']['EntryStation']);
+    }
+  }
+
+  // Layout Exit direction
+  if ($form_state['storage']['ajax']['Direction'] === 'Exit' or
+      $form_state['storage']['ajax']['Direction'] === 'EntryExit') {
+
+    $form['ajax']['Exit'] = array('#type' => 'fieldset', '#title' => t('Exit settings'));
+
+    // Layout exit gate
+    $options = array();
+    $options['NoGateNoLPR'] = chplane_menu_text('NoGateNoLPR');
+    $options['NoGateTrigger'] = chplane_menu_text('NoGateTrigger');
+    $options['NoGateFreeflow'] = chplane_menu_text('NoGateFreeflow');
+    $options['GateTrigger'] = chplane_menu_text('GateTrigger');
+    $options['GateFreeflow'] = chplane_menu_text('GateFreeflow');
+    if (!isset($form_state['storage']['ajax']['Exit']['Gate'])) {
+      $form_state['storage']['ajax']['Exit']['Gate'] = key($options);
+    }
+    $form['ajax']['Exit']['Gate'] =
+      array('#type' => 'radios',
+	    '#title' => t('Gate automation'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Exit']['Gate'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    if ($form_state['storage']['ajax']['Exit']['Gate'] === 'GateTrigger' or
+	$form_state['storage']['ajax']['Exit']['Gate'] === 'GateFreeflow') {
+      $options = array();
+      $options['Whitelist'] = chplane_menu_text('Whitelist');
+      //$options['ExitTicket'] = chplane_menu_text('ExitTicket');
+      /* $options['ExitWhitelist'] = chplane_menu_text('ExitWhitelist'); */
+      /* $options['ExitTicket'] = chplane_menu_text('ExitTicket'); */
+      if (!isset($form_state['storage']['ajax']['Exit']['ExitStation'])) {
+	$form_state['storage']['ajax']['Exit']['ExitStation'] = array();
+      }
+      $form['ajax']['Exit']['ExitStation'] =
+	array('#type' => 'checkboxes',
+	      '#title' => t('Exit station'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['Exit']['ExitStation']);
+    /* } elseif ($form_state['storage']['ajax']['Exit']['Gate'] === 'NoGateNoLPR' or */
+    /* 	      $form_state['storage']['ajax']['Exit']['Gate'] === 'NoGateTrigger' or */
+    /* 	      $form_state['storage']['ajax']['Exit']['Gate'] === 'NoGateFreeflow') { */
+    /*   $options = array(); */
+    /*   $options['None'] = t('None'); */
+    /*   $options['Midnight'] = chplane_menu_text('Midnight'); */
+    /*   $options['Monday'] = chplane_menu_text('Monday'); */
+    /*   if (!isset($form_state['storage']['ajax']['Exit']['Purge'])) { */
+    /* 	$form_state['storage']['ajax']['Exit']['Purge'] = key($options); */
+    /*   } */
+    /*   $form['ajax']['Exit']['Purge'] = */
+    /* 	array('#type' => 'radios', */
+    /* 	      '#title' => t('Vehicle purge'), */
+    /* 	      '#options' => $options, */
+    /* 	      '#default_value' => $form_state['storage']['ajax']['Exit']['Purge']); */
+    }
+  }
+
+  // LPR control
+  if ((isset($form_state['storage']['ajax']['Entry']['Gate']) and
+       $form_state['storage']['ajax']['Entry']['Gate'] !== 'NoGateNoLPR') or
+      (isset($form_state['storage']['ajax']['Exit']['Gate']) and
+       $form_state['storage']['ajax']['Exit']['Gate'] !== 'NoGateNoLPR')) {
+
+    if (isset($form_state['storage']['ajax']['AppId']) and
+	!in_array($form_state['storage']['ajax']['AppId'],
+		  array_keys($app_options))) {
+      unset($form_state['storage']['ajax']['AppId']);
+    }
+    if (!isset($form_state['storage']['ajax']['AppId'])) {
+      $form_state['storage']['ajax']['AppId'] = key($app_options);
+    }
+    $form['ajax']['AppId'] =
+      array('#type' => 'radios',
+	    '#title' => t('LPR'),
+	    '#options' => $app_options,
+	    '#default_value' => $form_state['storage']['ajax']['AppId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $clusters = chdbprop_get_lane_clusters
+      ($property_id, $form_state['storage']['ajax']['AppId']);
+
+    // Layout LPR controller cluster options
+    $options = array();
+    $options['StandAlone'] =
+      t('Standalone LPR controller',
+	array('LPR' => $app_options[$form_state['storage']['ajax']['AppId']]));
+    $options['Cluster'] =
+      t('Shared LPR controller',
+	array('LPR' => $app_options[$form_state['storage']['ajax']['AppId']]));
+
+    if (!isset($form_state['storage']['ajax']['LPRCluster'])) {
+      if (0 < count($clusters)) {
+	$form_state['storage']['ajax']['LPRCluster'] = 'Cluster';
+      } else {
+	$form_state['storage']['ajax']['LPRCluster'] = key($options);
+      }
+    }
+    if (0 < count($clusters)) {
+      $form['ajax']['LPRCluster'] =
+	array('#type' => 'radios',
+	      '#title' => t('LPR Controller clustering'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['LPRCluster'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    } else {
+      $form['ajax']['LPRCluster'] =
+	array('#type' => 'hidden',
+	      '#value' => $form_state['storage']['ajax']['LPRCluster']);
+    }
+
+    if ($form_state['storage']['ajax']['LPRCluster'] === 'Cluster') {
+      $options = array();
+      foreach ($clusters as $cluster_id => $flag) {
+	$li = array();
+	foreach (chdbprop_get_lanes($property_id, $cluster_id) as $lane) {
+	  $li[] = decode_entities($lane['Alias']);
+	}
+	$lane_list = theme_item_list($li);
+	$options[$cluster_id] = $lane_list;
+      }
+      if (!isset($form_state['storage']['ajax']['ClusterId'])) {
+	$form_state['storage']['ajax']['ClusterId'] = key($options);
+      }
+      if (1 < count($options)) {
+	$form['ajax']['ClusterId'] =
+	  array('#type' => 'radios',
+		'#title' => t('Cluster'),
+		'#options' => $options,
+		'#default_value' => $form_state['storage']['ajax']['ClusterId']);
+      } else {
+	$form['ajax']['ClusterId'] =
+	  array('#type' => 'hidden',
+		'#value' => $form_state['storage']['ajax']['ClusterId']);
+      }
+    }
+  }
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chplane_add_form_validate_save'),
+	  '#submit' => array('chplane_add_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chplane_add_form_submit_cancel'));
+  return $form;
+}
+
+function chplane_add_form_validate_save($form, &$form_state) {
+  if (isset($form_state['values']['ajax']['Alias']) and
+      empty($form_state['values']['ajax']['Alias'])) {
+    form_set_error('ajax][Alias', 'Lane name field is required.');
+    return;
+  }
+}
+
+function chplane_add_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+function chplane_add_form_submit_save($form, &$form_state) {
+  global $user;
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+  $lane_id = chpprop_genRandomString20();
+
+  $alias = check_plain($form_state['values']['ajax']['Alias']);
+
+  if (isset($form_state['values']['ajax']['AppId'])) {
+    $app_id = $form_state['values']['ajax']['AppId'];
+  } else {
+    $app_id = NULL;
+  }
+
+  if ($form_state['values']['ajax']['LPRCluster'] === 'StandAlone') {
+    $cluster_id = chpprop_genRandomString20();
+  } else {
+    $cluster_id = $form_state['values']['ajax']['ClusterId'];
+  }
+
+  if (isset($form_state['values']['ajax']['Direction']) and
+      ($form_state['values']['ajax']['Direction'] === 'Entry' or
+       $form_state['values']['ajax']['Direction'] === 'EntryExit')) {
+    $entry = TRUE;
+  } else {
+    $entry = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Direction']) and
+      ($form_state['values']['ajax']['Direction'] === 'Exit' or
+       $form_state['values']['ajax']['Direction'] === 'EntryExit')) {
+    $exit = TRUE;
+  } else {
+    $exit = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Entry']['Gate'])) {
+    $entry_gate = $form_state['values']['ajax']['Entry']['Gate'];
+  } else {
+    $entry_gate = 'NoGateNoLPR';
+  }
+
+  if (isset($form_state['values']['ajax']['Exit']['Gate'])) {
+    $exit_gate = $form_state['values']['ajax']['Exit']['Gate'];
+  } else {
+    $exit_gate = 'NoGateNoLPR';
+  }
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['Whitelist']) {
+    $entry_whitelist = TRUE;
+  } else {
+    $entry_whitelist = FALSE;
+  }
+
+  // TBD
+  $entry_blacklist = FALSE;
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['Hotlist']) {
+    $entry_hotlist = TRUE;
+  } else {
+    $entry_hotlist = FALSE;
+  }
+
+  // TBD
+  $entry_reslist = FALSE;
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['EntryCorrector']) {
+    $entry_corrector = TRUE;
+  } else {
+    $entry_corrector = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Exit']['ExitStation']) and
+      $form_state['values']['ajax']['Exit']['ExitStation']['Whitelist']) {
+    $exit_whitelist = TRUE;
+  } else {
+    $exit_whitelist = FALSE;
+  }
+
+  // TBD
+  $exit_blacklist = FALSE;
+
+  // TBD
+  $exit_hotlist = FALSE;
+
+  // TBD
+  $exit_reslist = FALSE;
+
+  // TBD
+  $exit_pay = FALSE;
+
+  if (chdbprop_insert_lane
+      ($user->uid, $property_id, $cluster_id, $lane_id, $alias,
+       $entry, $exit, $entry_gate, $exit_gate, $app_id,
+       $entry_whitelist, $entry_blacklist, $entry_hotlist,
+       $entry_reslist, $entry_corrector,
+       $exit_whitelist, $exit_blacklist, $exit_hotlist,
+       $exit_reslist, $exit_pay,
+       &$id)) {
+    drupal_set_message('Could not insert lane', 'error');
+    return;
+  }
+
+  $list = unserialize($form_state['values']['ajax']['property']['List']);
+  if (!empty($list)) {
+    foreach ($list as $propkey => $values) {
+      foreach ($values as $lotkey => $value) {
+	if ($value) {
+	  if (chdbprop_insert_laneprop
+	      ($cluster_id, $lane_id,
+	       $propkey, $lotkey,
+	       $id)) {
+	    drupal_set_message('Could not attach to property/lot', 'error');
+	    return;
+	  }
+	}
+      }
+    }
+  }
+
+  if ($form_state['values']['ajax']['LPRCluster'] === 'StandAlone') {
+    $agent_id = chpmob_create_new_key();
+
+    if (chdbprop_cc_insert_agent_lane
+	($user->uid, $property_id, $agent_id, $app_id, $cluster_id,
+	 $id)) {
+      drupal_set_message('Could not insert entry lane key', 'error');
+      return;
+    }
+  }
+
+  if (chdbprop_insert_agentpoll_lane($cluster_id, $lane_id)) {
+    drupal_set_message('Could not insert lane agent poll', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+
+
+/**********
+ ********** Lanes
+ ********** Address: chplane
+ ********** Access:  'anai chp list lanes
+ *********/
+
+
+
+function chplane_list_form($form_state) {
+  if ($form_state['storage']['detailed_edit']) {
+    return chplane_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Lanes'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  /*
+   * Note:
+   *  Lanes are handled with clusters which can be serving multiple lots.
+   *  Hence no meaning of selecting lot.
+   */
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_properties'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chplane_list_form_submit_back';
+  if (user_access('anai chp add lanes')) {
+    $settings['buttons']['add']['submit'] = 'chplane_list_form_submit_add';
+  }
+  if (user_access('anai chp options lanes')) {
+    $settings['buttons']['options']['submit'] = 'chplane_list_form_submit_options';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+
+  $counts = array();
+  foreach (chdbprop_get_lanecount($property_id) as $value) {
+    if (!isset($counts[$value['LaneId']])) {
+      $counts[$value['LaneId']] = 0;
+    }
+    $counts[$value['LaneId']] += $value['Count'];
+  }
+
+  $countrefs = array();
+  foreach (chdbprop_get_lanecountref($user->uid, $property_id) as $value) {
+    $countrefs[$value['LaneId']] = $value['Ref'];
+  } //anai_dbg($countrefs);
+
+  $countlasts = array();
+  foreach (chdbprop_get_lanecountlast($property_id) as $value) {
+    $countlasts[$value['LaneId']] = $value['TimeUTC'];
+  }
+
+  $status = array();
+
+  foreach (chdbprop_get_all_apps() as $app) {
+    if ($app['SecureparkPolicy'] or $app['VideoparkPolicy']) {
+      $clusters = chdbprop_get_lane_clusters($property_id, $app['AppId']);
+      foreach ($clusters as $cluster_id => $flag) {
+	$clusterstatus = chdbprop_get_clusterstatus($app['AppId'], $cluster_id);
+	$lanes = array();
+	foreach (chdbprop_get_lanes($property_id, $cluster_id) as $value) {
+	  $lanes[$value['LaneId']] = $value;
+	  $status[$value['LaneId']] = 'NEUTRAL';
+
+	  if (isset($countlasts[$value['LaneId']])) {
+	    $time = chpuser_datetime_utc_to_utc($countlasts[$value['LaneId']]);
+	    $time->modify("+1800 seconds");
+	    $now = chpuser_datetime_utc_to_utc('now');
+	    if ($now > $time) {
+	      $status[$value['LaneId']] = 'WARNING';
+	    } else {
+	      $status[$value['LaneId']] = 'OK';
+	    }
+	  }
+
+	  if (!empty($clusterstatus)) {
+	    $time = chpuser_datetime_utc_to_utc($clusterstatus['LastUTC']);
+	    $time->modify("+10 minutes");
+	    $now = chpuser_datetime_utc_to_utc('now');
+	    if ($now > $time) {
+	      $status[$value['LaneId']] = 'CRITICAL';
+	    }
+	  }
+	}
+	$form['ajax'][$cluster_id] =
+	  array('#type' => 'fieldset', '#title' => decode_entities($app['Alias']));
+	if (empty($lanes)) {
+	  $form['ajax'][$cluster_id]['list'] = array('#value' => t('Empty.'));
+	} else {
+	  $form['ajax'][$cluster_id]['list'] =
+	    chplane_list_table_form($lanes, $counts, $countlasts, $countrefs, $status);
+	}
+	$total = 0;
+	foreach ($counts as $key => $value) {
+	  if (!in_array($key, array_keys($lanes))) {
+	    continue;
+	  }
+	  if (isset($countrefs[$key])) {
+	    if ($value >= $countrefs[$key]) {
+	      $total += ($value - $countrefs[$key]);
+	    } else {
+	      $total = t('Reset needed');
+	    }
+	  } else {
+	    $total += $value;
+	  }
+	}
+	$form['ajax'][$cluster_id]['total'] =
+	  array('#value' => t('Total counts: NUM', array('NUM' => $total)));
+      }
+    }
+  }
+
+  return $form;
+}
+
+function chplane_list_table_form($entries, $counts, $countlasts, $countrefs, $status) {
+  global $user;
+  $form['db'] = array('#type' => 'markup', '#theme' => 'chplane_list_table');
+
+  if (user_access('anai chp edit lanes')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $lane_id => $lane) {
+    $form['db']['name_'.$looper] =
+      array('#value' => decode_entities($lane['Alias']));
+
+    if ($lane['Entry']) {
+      $form['db']['entrygate_'.$looper] =
+	array('#value' => chplane_menu_text($lane['EntryGate']));
+    } else {
+      $form['db']['entrygate_'.$looper] =
+	array('#value' => t(''));
+    }
+
+    if ($lane['Entry']) {
+      if ($status[$lane_id] === 'OK') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/greenled.png">';
+      } elseif ($status[$lane_id] === 'WARNING') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/yellowled.png">';
+      } elseif ($status[$lane_id] === 'CRITICAL') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/redled.png">';
+      } else {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/neutralled.png">';
+      }
+      $form['db']['entrystatus_'.$looper] = array('#value' => $link);
+    } else {
+      $form['db']['entrystatus_'.$looper] = array('#value' => '');
+    }
+
+    if ($lane['Exit']) {
+      $form['db']['exitgate_'.$looper] =
+	array('#value' => chplane_menu_text($lane['ExitGate']));
+    } else {
+      $form['db']['exitgate_'.$looper] =
+	array('#value' => t(''));
+    }
+
+    if ($lane['Exit']) {
+      if ($status[$lane_id] === 'OK') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/greenled.png">';
+      } elseif ($status[$lane_id] === 'WARNING') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/yellowled.png">';
+      } elseif ($status[$lane_id] === 'CRITICAL') {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/redled.png">';
+      } else {
+	$link = '<img src="'.drupal_get_path('module', 'anai').'/neutralled.png">';
+      }
+      $form['db']['exitstatus_'.$looper] = array('#value' => $link);
+    } else {
+      $form['db']['exitstatus_'.$looper] = array('#value' => '');
+    }
+
+    if (isset($counts[$lane['LaneId']])) {
+      if (isset($countrefs[$lane['LaneId']])) {
+	if ($counts[$lane['LaneId']] >= $countrefs[$lane['LaneId']]) {
+	  $form['db']['counts_'.$looper] =
+	    array('#value' => '<center>'.
+		  ($counts[$lane['LaneId']] - $countrefs[$lane['LaneId']]).
+		  '</center>');
+	} else {
+	  $form['db']['counts_'.$looper] =
+	    array('#value' => '<center>'.t('Reset needed').'</center>');
+	}
+      } else {
+	$form['db']['counts_'.$looper] =
+	  array('#value' => '<center>'.$counts[$lane['LaneId']].'</center>');
+      }
+    } else {
+      $form['db']['counts_'.$looper] = array('#value' => '<center>0</center>');
+    }
+
+    if (isset($countlasts[$lane['LaneId']])) {
+      $time = chpuser_datetime_utc_to_usertimezone($countlasts[$lane['LaneId']]);
+      $form['db']['last_'.$looper] = array('#value' => $time->format("M j,y H:i:s"));
+    } else {
+      $form['db']['last_'.$looper] = array('#value' => '');
+    }
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$lane['Id'],
+	      '#submit' => array('chplane_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chplane_list_table($form) {
+  // Table Header
+  $header = array(t('Lane name'),
+		  array('data' => t('Entry'),
+			'colspan' => 2),
+		  array('data' => t('Exit'),
+			'colspan' => 2),
+		  t('Counts'), t('Last'),
+		  '');
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'name_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('name_'));
+    $rows[] = array(drupal_render($form['name_'.$looper]),
+                    drupal_render($form['entrygate_'.$looper]),
+                    array('data' => drupal_render($form['entrystatus_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    drupal_render($form['exitgate_'.$looper]),
+                    array('data' => drupal_render($form['exitstatus_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    array('data' => drupal_render($form['counts_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    drupal_render($form['last_'.$looper]),
+                    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chplane_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chplane_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplaneadd';
+}
+
+function chplane_list_form_submit_options($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplaneopt';
+}
+
+function chplane_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form
+      ($form, 'Are you sure?', 'chplane',
+       'The lane will be deleted from the system.');
+  }
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id'];
+  $lane = chdbprop_get_lane_id($id);
+  $lane_id = $lane['LaneId'];
+  $property_id = $lane['PropertyId'];
+  $property = chdbprop_get_property($property_id);
+
+  //drupal_set_title(t('Edit lane'));
+  drupal_set_title(t('Edit lane - LANE', array('LANE' => decode_entities($lane['Alias']))));
+
+  // Create property options
+  $property_options = array();
+  $property_options[$property_id] =
+    decode_entities($property['Alias']).', '.
+    decode_entities($property['Street']).', '.
+    decode_entities($property['City']);
+
+  // Create and validate policies options, used later for lot selection
+  $policies = chpprop_retrieve_policies($user->uid);
+  if (empty($policies)) {
+    $form['ajax']['error'] = array('#value' => '<p>'.t('Lot missing.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chplane_edit_form_submit_cancel'));
+    return $form;
+  }
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  // Property/Lot selector
+  $form['ajax']['property'] = array('#type' => 'fieldset', '#title' => t('Assignment'));
+
+  // Create and validate lot options based on selected property
+  $lot_options = array();
+  if (isset($policies[$property_id])) {
+    foreach ($policies[$property_id] as $lot_id => $policy) {
+      if (empty($policy['data']['EquipmentId'])) {
+	continue;
+      }
+      // TBD also check Equipment for LPR
+      $lot_options[$lot_id] = decode_entities($policy['data']['Alias']);
+    }
+  }
+  if (empty($lot_options)) {
+    $form['ajax']['property']['error'] = array('#value' => '<p>'.t('Equipment policy missing on lot.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chplane_edit_form_submit_cancel'));
+
+    return $form;
+  }
+
+  // Layout lot options
+  if (isset($form_state['storage']['ajax']['property']['LotId']) and
+      !in_array($form_state['storage']['ajax']['property']['LotId'],
+		array_keys($lot_options))) {
+    unset($form_state['storage']['ajax']['property']['LotId']);
+  }
+  if (!isset($form_state['storage']['ajax']['property']['LotId'])) {
+    $form_state['storage']['ajax']['property']['LotId'] = key($lot_options);
+  }
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['LotId'] =
+      array('#type' => 'select',
+	    '#title' => t('Lot'),
+	    '#options' => $lot_options,
+	    '#default_value' => $form_state['storage']['ajax']['property']['LotId']);
+  }
+
+  $lot_id = $form_state['storage']['ajax']['property']['LotId'];
+
+  if (1 < count($lot_options)) {
+    $form['ajax']['property']['addbtn'] = array('#type' => 'button', '#value' => t('Add'));
+    $form['ajax']['property']['clearbtn'] = array('#type' => 'button', '#value' => t('Clear'));
+    $form['ajax']['property']['allbtn'] = array('#type' => 'button', '#value' => t('All'));
+    if (!isset($form_state['storage']['ajax']['property']['List'])) {
+      $list = array();
+      $props = chpprop_retrieve_laneprops($user->uid, $lane_id);
+      foreach ($props as $propkey => $values) {
+	foreach ($values as $lotkey => $value) {
+	  if (empty($policies[$propkey][$lotkey]['data']['EquipmentId'])) {
+	    continue;
+	  }
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+      $form_state['storage']['ajax']['property']['List'] = $list;
+    } else {
+      $list = unserialize($form_state['storage']['ajax']['property']['List']);
+    }
+
+    if (strpos($form_state['clicked_button']['#id'], 'addbtn') !== FALSE) {
+      $list[$property_id][$lot_id] = TRUE;
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'clearbtn') !== FALSE) {
+      $list = array();
+    }
+    if (strpos($form_state['clicked_button']['#id'], 'allbtn') !== FALSE) {
+      foreach ($property_options as $propkey => $propvalue) {
+	foreach ($policies[$propkey] as $lotkey => $lotvalue) {
+	  if (empty($policies[$propkey][$lotkey]['data']['EquipmentId'])) {
+	    continue;
+	  }
+	  $list[$propkey][$lotkey] = TRUE;
+	}
+      }
+    }
+  } else {
+    $list[$property_id][$lot_id] = TRUE;
+  }
+
+  $form['ajax']['property']['List'] =
+    array('#type' => 'value', '#value' => serialize($list));
+
+  $header = array(t('Property'), t('Lot'));
+  $rows = array();
+  foreach ($list as $propkey => $values) {
+    foreach ($values as $lotkey => $value) {
+      $rows[] = array($property_options[$propkey], $lot_options[$lotkey]);
+    }
+  }
+  $form['ajax']['property']['ListView'] = array('#value' => theme_table($header, $rows));
+
+  // Create apps options
+  $app_options = array();
+  $apps = array();
+  foreach (chdbprop_get_all_apps() as $app) {
+    if ($app['SecureparkPolicy'] or $app['VideoparkPolicy']) {
+      $app_options[$app['AppId']] = decode_entities($app['Alias']);
+      $apps[$app['AppId']] = array('Securepark' => $app['SecureparkPolicy'] ? TRUE : FALSE,
+				   'Videopark' => $app['VideoparkPolicy'] ? TRUE : FALSE);
+    }
+  }
+
+  // Layout Alias
+  if (!isset($form_state['storage']['ajax']['Alias'])) {
+    $form_state['storage']['ajax']['Alias'] = decode_entities($lane['Alias']);
+  }
+  $form['ajax']['Alias'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Lane name'),
+	  '#maxlength' => 30,
+	  '#default_value' => $form_state['storage']['ajax']['Alias']);
+
+  // Layout direction
+  $options = array();
+  $options['Entry'] = t('Entry');
+  $options['Exit'] = t('Exit');
+  $options['EntryExit'] = t('Both');
+  if (!isset($form_state['storage']['ajax']['Direction'])) {
+    if ($lane['Entry'] and $lane['Exit']) {
+      $form_state['storage']['ajax']['Direction'] = 'EntryExit';
+    } elseif ($lane['Entry']) {
+      $form_state['storage']['ajax']['Direction'] = 'Entry';
+    } elseif ($lane['Exit']) {
+      $form_state['storage']['ajax']['Direction'] = 'Exit';
+    } else {
+      $form_state['storage']['ajax']['Direction'] = key($options);
+    }
+  }
+  $form['ajax']['Direction'] =
+    array('#type' => 'radios',
+	  '#title' => t('Direction'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Direction'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Layout Entry direction
+  if ($form_state['storage']['ajax']['Direction'] === 'Entry' or
+      $form_state['storage']['ajax']['Direction'] === 'EntryExit') {
+
+    $form['ajax']['Entry'] = array('#type' => 'fieldset', '#title' => t('Entry settings'));
+
+    // Layout entry gate
+    $options = array();
+    $options['NoGateNoLPR'] = chplane_menu_text('NoGateNoLPR');
+    $options['NoGateTrigger'] = chplane_menu_text('NoGateTrigger');
+    $options['NoGateFreeflow'] = chplane_menu_text('NoGateFreeflow');
+    $options['GateTrigger'] = chplane_menu_text('GateTrigger');
+    $options['GateFreeflow'] = chplane_menu_text('GateFreeflow');
+    if (!isset($form_state['storage']['ajax']['Entry']['Gate'])) {
+      if ($lane['EntryGate'] === 'NoGateNoLPR') {
+	$form_state['storage']['ajax']['Entry']['Gate'] = $lane['EntryGate'];
+      } elseif ($lane['EntryGate'] === 'NoGateTrigger') {
+	$form_state['storage']['ajax']['Entry']['Gate'] = $lane['EntryGate'];
+      } elseif ($lane['EntryGate'] === 'NoGateFreeflow') {
+	$form_state['storage']['ajax']['Entry']['Gate'] = $lane['EntryGate'];
+      } elseif ($lane['EntryGate'] === 'GateTrigger') {
+	$form_state['storage']['ajax']['Entry']['Gate'] = $lane['EntryGate'];
+      } elseif ($lane['EntryGate'] === 'GateFreeflow') {
+	$form_state['storage']['ajax']['Entry']['Gate'] = $lane['EntryGate'];
+      } else {
+	$form_state['storage']['ajax']['Entry']['Gate'] = key($options);
+      }
+      if (!in_array($form_state['storage']['ajax']['Entry']['Gate'],
+		    array_keys($options))) {
+	$form_state['storage']['ajax']['Entry']['Gate'] = key($options);
+      }
+    }
+    $form['ajax']['Entry']['Gate'] =
+      array('#type' => 'radios',
+	    '#title' => t('Gate automation'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Entry']['Gate'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    // Layout value added when athorization is used
+    if ($form_state['storage']['ajax']['Entry']['Gate'] === 'GateTrigger' or
+	$form_state['storage']['ajax']['Entry']['Gate'] === 'GateFreeflow') {
+      $options = array();
+      $options['Whitelist'] = chplane_menu_text('Whitelist');
+      /* $options['Blacklist'] = chplane_menu_text('Blacklist'); */
+      $options['Hotlist'] = chplane_menu_text('Hotlist');
+      /* $options['Reslist'] = chplane_menu_text('Reslist'); */
+      $options['EntryCorrector'] = chplane_menu_text('EntryCorrector');
+      if (!isset($form_state['storage']['ajax']['Entry']['EntryStation'])) {
+	$form_state['storage']['ajax']['Entry']['EntryStation'] = array();
+	if ($lane['EntryWhitelist']) {
+	  $form_state['storage']['ajax']['Entry']['EntryStation']['Whitelist'] =
+	    'Whitelist';
+	}
+	if ($lane['EntryBlacklist']) {
+	  $form_state['storage']['ajax']['Entry']['EntryStation']['Blacklist'] =
+	    'Blacklist';
+	}
+	if ($lane['EntryHotlist']) {
+	  $form_state['storage']['ajax']['Entry']['EntryStation']['Hotlist'] =
+	    'Hotlist';
+	}
+	if ($lane['EntryReslist']) {
+	  $form_state['storage']['ajax']['Entry']['EntryStation']['Reslist'] =
+	    'Reslist';
+	}
+	if ($lane['EntryCorrector']) {
+	  $form_state['storage']['ajax']['Entry']['EntryStation']['EntryCorrector'] =
+	    'EntryCorrector';
+	}
+      }
+      $form['ajax']['Entry']['EntryStation'] =
+	array('#type' => 'checkboxes',
+	      '#title' => t('Entry station'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['Entry']['EntryStation']);
+    }
+  }
+
+  // Layout Exit direction
+  if ($form_state['storage']['ajax']['Direction'] === 'Exit' or
+      $form_state['storage']['ajax']['Direction'] === 'EntryExit') {
+
+    $form['ajax']['Exit'] = array('#type' => 'fieldset', '#title' => t('Exit settings'));
+
+    // Layout exit gate
+    $options = array();
+    $options['NoGateNoLPR'] = chplane_menu_text('NoGateNoLPR');
+    $options['NoGateTrigger'] = chplane_menu_text('NoGateTrigger');
+    $options['NoGateFreeflow'] = chplane_menu_text('NoGateFreeflow');
+    $options['GateTrigger'] = chplane_menu_text('GateTrigger');
+    $options['GateFreeflow'] = chplane_menu_text('GateFreeflow');
+    if (!isset($form_state['storage']['ajax']['Exit']['Gate'])) {
+      if ($lane['ExitGate'] === 'NoGateNoLPR') {
+	$form_state['storage']['ajax']['Exit']['Gate'] = $lane['ExitGate'];
+      } elseif ($lane['ExitGate'] === 'NoGateTrigger') {
+	$form_state['storage']['ajax']['Exit']['Gate'] = $lane['ExitGate'];
+      } elseif ($lane['ExitGate'] === 'NoGateFreeflow') {
+	$form_state['storage']['ajax']['Exit']['Gate'] = $lane['ExitGate'];
+      } elseif ($lane['ExitGate'] === 'GateTrigger') {
+	$form_state['storage']['ajax']['Exit']['Gate'] = $lane['ExitGate'];
+      } elseif ($lane['ExitGate'] === 'GateFreeflow') {
+	$form_state['storage']['ajax']['Exit']['Gate'] = $lane['ExitGate'];
+      } else {
+	$form_state['storage']['ajax']['Exit']['Gate'] = key($options);
+      }
+      if (!in_array($form_state['storage']['ajax']['Exit']['Gate'],
+		    array_keys($options))) {
+	$form_state['storage']['ajax']['Exit']['Gate'] = key($options);
+      }
+    }
+    $form['ajax']['Exit']['Gate'] =
+      array('#type' => 'radios',
+	    '#title' => t('Gate automation'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Exit']['Gate'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    if ($form_state['storage']['ajax']['Exit']['Gate'] === 'GateTrigger' or
+	$form_state['storage']['ajax']['Exit']['Gate'] === 'GateFreeflow') {
+      $options = array();
+      $options['Whitelist'] = chplane_menu_text('Whitelist');
+      //$options['ExitTicket'] = chplane_menu_text('ExitTicket');
+      /* $options['ExitWhitelist'] = chplane_menu_text('ExitWhitelist'); */
+      /* $options['ExitTicket'] = chplane_menu_text('ExitTicket'); */
+      if (!isset($form_state['storage']['ajax']['Exit']['ExitStation'])) {
+	$form_state['storage']['ajax']['Exit']['ExitStation'] = array();
+	if ($lane['ExitWhitelist']) {
+	  $form_state['storage']['ajax']['Exit']['ExitStation']['Whitelist'] =
+	    'Whitelist';
+	}
+	if ($lane['ExitBlacklist']) {
+	  $form_state['storage']['ajax']['Exit']['ExitStation']['Blacklist'] =
+	    'Blacklist';
+	}
+	if ($lane['ExitHotlist']) {
+	  $form_state['storage']['ajax']['Exit']['ExitStation']['Hotlist'] =
+	    'Hotlist';
+	}
+	if ($lane['ExitReslist']) {
+	  $form_state['storage']['ajax']['Exit']['ExitStation']['Reslist'] =
+	    'Reslist';
+	}
+	if ($lane['ExitPay']) {
+	  $form_state['storage']['ajax']['Exit']['ExitStation']['ExitPay'] =
+	    'ExitPay';
+	}
+      }
+      $form['ajax']['Exit']['ExitStation'] =
+	array('#type' => 'checkboxes',
+	      '#title' => t('Exit station'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['Exit']['ExitStation']);
+    }
+  }
+
+  // LPR control
+  if ((isset($form_state['storage']['ajax']['Entry']['Gate']) and
+       $form_state['storage']['ajax']['Entry']['Gate'] !== 'NoGateNoLPR') or
+      (isset($form_state['storage']['ajax']['Exit']['Gate']) and
+       $form_state['storage']['ajax']['Exit']['Gate'] !== 'NoGateNoLPR')) {
+
+    if (isset($form_state['storage']['ajax']['AppId']) and
+	!in_array($form_state['storage']['ajax']['AppId'],
+		  array_keys($app_options))) {
+      unset($form_state['storage']['ajax']['AppId']);
+    }
+    if (!isset($form_state['storage']['ajax']['AppId'])) {
+      if (in_array($lane['AppId'], array_keys($app_options))) {
+	$form_state['storage']['ajax']['AppId'] = $lane['AppId'];
+      } else {
+	$form_state['storage']['ajax']['AppId'] = key($app_options);
+      }
+    }
+    $form['ajax']['AppId'] =
+      array('#type' => 'radios',
+	    '#title' => t('LPR'),
+	    '#options' => $app_options,
+	    '#default_value' => $form_state['storage']['ajax']['AppId'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    $lanes = chdbprop_get_lanes($property_id, $lane['ClusterId']);
+    $clusters = chdbprop_get_lane_clusters
+      ($property_id, $form_state['storage']['ajax']['AppId']);
+
+    // Layout LPR controller cluster options
+    $options = array();
+    $options['StandAlone'] =
+      t('Standalone LPR controller',
+	array('LPR' => $app_options[$form_state['storage']['ajax']['AppId']]));
+    $options['Cluster'] =
+      t('Shared LPR controller',
+	array('LPR' => $app_options[$form_state['storage']['ajax']['AppId']]));
+
+    if (!isset($form_state['storage']['ajax']['LPRCluster'])) {
+      if (1 < count($lanes)) {
+	$form_state['storage']['ajax']['LPRCluster'] = 'Cluster';
+      } else {
+	$form_state['storage']['ajax']['LPRCluster'] = 'StandAlone';
+      }
+    }
+    if (0 < count($clusters)) {
+      $form['ajax']['LPRCluster'] =
+	array('#type' => 'radios',
+	      '#title' => t('LPR Controller clustering'),
+	      '#options' => $options,
+	      '#default_value' => $form_state['storage']['ajax']['LPRCluster'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+    } else {
+      $form['ajax']['LPRCluster'] =
+	array('#type' => 'hidden',
+	      '#value' => $form_state['storage']['ajax']['LPRCluster']);
+    }
+
+    if ($form_state['storage']['ajax']['LPRCluster'] === 'Cluster') {
+      $options = array();
+      foreach ($clusters as $cluster_id => $flag) {
+	$li = array();
+	foreach (chdbprop_get_lanes($property_id, $cluster_id) as $value) {
+	  $li[] = decode_entities($value['Alias']);
+	}
+	$lane_list = theme_item_list($li);
+	$options[$cluster_id] = $lane_list;
+      }
+
+      if (!isset($form_state['storage']['ajax']['ClusterId'])) {
+	if (in_array($lane['ClusterId'], array_keys($options))) {
+	  $form_state['storage']['ajax']['ClusterId'] = $lane['ClusterId'];
+	} else {
+	  $form_state['storage']['ajax']['ClusterId'] = key($options);
+	}
+      }
+      if (1 < count($options)) {
+	$form['ajax']['ClusterId'] =
+	  array('#type' => 'radios',
+		'#title' => t('Cluster'),
+		'#options' => $options,
+		'#default_value' => $form_state['storage']['ajax']['ClusterId']);
+      } else {
+	$form['ajax']['ClusterId'] =
+	  array('#type' => 'hidden',
+		'#value' => $form_state['storage']['ajax']['ClusterId']);
+      }
+    }
+  }
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chplane_add_form_validate_save'),
+	  '#submit' => array('chplane_edit_form_submit_save'));
+
+  $form['ajax']['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chplane_edit_form_submit_cancel'));
+
+  if (user_access('anai chp delete lanes')) {
+    $form['ajax']['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+	    '#submit' => array('chplane_edit_form_submit_delete'));
+  }
+  return $form;
+}
+
+function chplane_edit_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+function chplane_edit_form_submit_delete($form, &$form_state) {
+  $form_state['storage']['confirm_delete'] = TRUE;
+}
+
+function chplane_edit_form_submit_save($form, &$form_state) {
+  global $user;
+  $id = $form_state['storage']['id'];
+  $lane = chdbprop_get_lane_id($id);
+  $property_id = $lane['PropertyId'];
+  $lane_id = $lane['LaneId'];
+  $cluster_id = $lane['ClusterId'];
+
+  $alias = check_plain($form_state['values']['ajax']['Alias']);
+
+  if (isset($form_state['values']['ajax']['Direction']) and
+      ($form_state['values']['ajax']['Direction'] === 'Entry' or
+       $form_state['values']['ajax']['Direction'] === 'EntryExit')) {
+    $entry = TRUE;
+  } else {
+    $entry = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Direction']) and
+      ($form_state['values']['ajax']['Direction'] === 'Exit' or
+       $form_state['values']['ajax']['Direction'] === 'EntryExit')) {
+    $exit = TRUE;
+  } else {
+    $exit = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Entry']['Gate'])) {
+    $entry_gate = $form_state['values']['ajax']['Entry']['Gate'];
+  } else {
+    $entry_gate = 'NoGateNoLPR';
+  }
+
+  if (isset($form_state['values']['ajax']['Exit']['Gate'])) {
+    $exit_gate = $form_state['values']['ajax']['Exit']['Gate'];
+  } else {
+    $exit_gate = 'NoGateNoLPR';
+  }
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['Whitelist']) {
+    $entry_whitelist = TRUE;
+  } else {
+    $entry_whitelist = FALSE;
+  }
+
+  // TBD
+  $entry_blacklist = FALSE;
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['Hotlist']) {
+    $entry_hotlist = TRUE;
+  } else {
+    $entry_hotlist = FALSE;
+  }
+
+  // TBD
+  $entry_reslist = FALSE;
+
+  if (isset($form_state['values']['ajax']['Entry']['EntryStation']) and
+      $form_state['values']['ajax']['Entry']['EntryStation']['EntryCorrector']) {
+    $entry_corrector = TRUE;
+  } else {
+    $entry_corrector = FALSE;
+  }
+
+  if (isset($form_state['values']['ajax']['Exit']['ExitStation']) and
+      $form_state['values']['ajax']['Exit']['ExitStation']['Whitelist']) {
+    $exit_whitelist = TRUE;
+  } else {
+    $exit_whitelist = FALSE;
+  }
+
+  // TBD
+  $exit_blacklist = FALSE;
+
+  // TBD
+  $exit_hotlist = FALSE;
+
+  // TBD
+  $exit_reslist = FALSE;
+
+  // TBD
+  $exit_pay = FALSE;
+
+  if (chdbprop_update_lane
+      ($id, $alias,
+       $entry, $exit, $entry_gate, $exit_gate,
+       $entry_whitelist, $entry_blacklist, $entry_hotlist,
+       $entry_reslist, $entry_corrector,
+       $exit_whitelist, $exit_blacklist, $exit_hotlist,
+       $exit_reslist, $exit_pay)) {
+    drupal_set_message('Could not update lane', 'error');
+    return;
+  }
+
+  $list = unserialize($form_state['values']['ajax']['property']['List']);
+
+  // Delete property assignments for those not in new list
+  $props = chpprop_retrieve_laneprops($user->uid, $lane_id);
+  //anai_dbg($props, '$props');
+
+  foreach ($props as $propkey => $values) {
+    foreach ($values as $lotkey => $value) {
+      if (isset($list[$propkey][$lotkey])) {
+	// Mark as not needing insertion
+	$list[$propkey][$lotkey] = FALSE;
+      } else {
+	if (chdbprop_delete_laneprop
+	    ($lane_id,
+	     $propkey, $lotkey)) {
+	  drupal_set_message('Could not delete from property/lot', 'error');
+	  return;
+	}
+      }
+    }
+  }
+
+  // Insert new assigned properties
+  if (!empty($list)) {
+    foreach ($list as $propkey => $values) {
+      foreach ($values as $lotkey => $value) {
+	if ($value) {
+	  if (chdbprop_insert_laneprop
+	      ($cluster_id, $lane_id,
+	       $propkey, $lotkey,
+	       $id)) {
+	    drupal_set_message('Could not attach to property/lot', 'error');
+	    return;
+	  }
+	}
+      }
+    }
+  }
+
+  if (chdbprop_insert_agentpoll_lane($cluster_id, $lane_id)) {
+    drupal_set_message('Could not insert lane agent poll', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+function chplane_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    $lane = chdbprop_get_lane_id($id);
+    chdbprop_delete_lane_id($id);
+    chdbprop_delete_laneprops($lane['LaneId']);
+    chdbprop_delete_agent_from_lane($lane['LaneId']);
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chplane';
+    return;
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Lane options
+ ********** Address: chplaneopt
+ ********** Access:  'anai chp list lanes
+ *********/
+
+
+
+function chplane_options_form($form_state) {
+
+  drupal_set_title(t('Lane behaviour options'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_properties'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+
+  // Layout counts
+  $form['ajax']['counts'] =
+    array('#type' => 'fieldset', '#title' => t('Counts'));
+
+  $options = array();
+  $options['None'] = t('Never');
+  $options['Midnight'] = t('Reset every day at midnight');
+  $options['Monday'] = t('Reset every Monday at midnight');
+  if (!isset($form_state['storage']['ajax']['counts']['Reset'])) {
+    $opt = chdbprop_get_lanecountopt($user->uid, $property_id);
+    if (!empty($opt) and in_array($opt['Scheme'], array_keys($options))) {
+      $form_state['storage']['ajax']['counts']['Reset'] = $opt['Scheme'];
+    } else {
+      $form_state['storage']['ajax']['counts']['Reset'] = key($options);
+    }
+  }
+  $form['ajax']['counts']['Reset'] =
+    array('#type' => 'radios',
+	  '#title' => t('Reset schedule'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['counts']['Reset']);
+
+  $form['ajax']['counts']['ResetNow'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('Reset now'),
+	  '#description' => t('Counters will be reset when saving'));
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#submit' => array('chplane_options_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chplane_options_form_submit_cancel'));
+
+  return $form;
+}
+
+function chplane_options_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+// Return 0 on success, otherwise 1
+function chplane_snapshot_counters($uid, $property_id) {
+  $counts = array();
+  foreach (chdbprop_get_lanecount($property_id) as $value) {
+    if (!isset($counts[$value['LaneId']])) {
+      $counts[$value['LaneId']] = 0;
+    }
+    $counts[$value['LaneId']] += $value['Count'];
+  }
+
+  if (chdbprop_delete_lanecountref($uid, $property_id, 'ANY')) {
+    drupal_set_message('Can\'t purge counter references', 'error');
+    return 1;
+  }
+
+  foreach ($counts as $key => $value) {
+    if (chdbprop_insert_lanecountref($uid, $property_id, $key, $value)) {
+      drupal_set_message('Can\'t insert counter reference', 'error');
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+function chplane_options_form_submit_save($form, &$form_state) {
+  global $user;
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+
+  $opt = chdbprop_get_lanecountopt($user->uid, $property_id);
+  if (!empty($opt)) {
+    if (chdbprop_update_lanecountopt
+	($user->uid,
+	 $property_id,
+	 $form_state['values']['ajax']['counts']['Reset'])) {
+      drupal_set_message('Couldn\'t update lane counter option', 'error');
+      return;
+    }
+  } else {
+    if (chdbprop_insert_lanecountopt
+	($user->uid,
+	 $property_id,
+	 $form_state['values']['ajax']['counts']['Reset'])) {
+      drupal_set_message('Couldn\'t insert lane counter option', 'error');
+      return;
+    }
+  }
+
+  if ($form_state['values']['ajax']['counts']['ResetNow']) {
+    if (chplane_snapshot_counters($user->uid, $property_id)) {
+      drupal_set_message('Couldn\'t snapshot counter references', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chplane';
+}
+
+
+

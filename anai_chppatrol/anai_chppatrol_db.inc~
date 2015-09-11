@@ -1,0 +1,416 @@
+<?php
+// $Id$
+
+
+/***************  patroller_table  ***************/
+
+
+
+function chdbpatrol_get_patroller_id($id) {
+  $entries = array();
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return $entries;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return $entries;
+  }
+  // Perform DB command
+  $sql = sprintf("SELECT * FROM patroller_table WHERE Id=%d", $id);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries = $entry;
+  }
+  return $entries;
+}
+
+
+
+function chdbpatrol_get_patrollers($company_id, $active = TRUE) {
+  $entries = array();
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return $entries;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return $entries;
+  }
+  // Perform DB command
+  $sql = sprintf("SELECT * FROM patroller_table WHERE CompanyId='%s' AND Active=%d",
+		 $company_id, $active ? 1 : 0);
+  //drupal_set_message($sql);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries[] = $entry;
+  }
+  return $entries;
+}
+
+
+
+function chdbpatrol_get_patroller($company_id, $patroller_id) {
+  $entries = array();
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return $entries;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return $entries;
+  }
+  // Perform DB command
+  $sql = "SELECT * FROM patroller_table WHERE";
+  $sql .= sprintf(" CompanyId='%s' AND PatrollerId='%s'",
+		 $company_id, $patroller_id);
+  //drupal_set_message($sql);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries = $entry;
+  }
+  return $entries;
+}
+
+
+
+// Insert a new entry
+// Return 0 on success, otherwise 1 
+function chdbpatrol_insert_new_patroller($username, $company_id, $patroller_id,
+					 $password, $comment,
+					 $session, $idle,
+					 $tickets, $boots, $whitelist, $hotlist,
+					 $valet, &$id) {
+  $db_name = getenv('APPS_LPMS_AGENT_DB'); //print_r($db_name);
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  $sql = "INSERT INTO patroller_table (User,CompanyId,PatrollerId,";
+  $sql .= "Password,SessionMinutes,IdleMinutes,Comment,";
+  $sql .= "Tickets,Boots,Whitelist,Hotlist,Valet) ";
+  $sql .= sprintf("VALUES ('%s','%s','%s','%s',%d,%d,'%s',%d,%d,%d,%d,%d)",
+		  $username, $company_id, $patroller_id,
+		  $password, $session, $idle, $comment,
+		  $tickets ? 1 : 0,
+		  $boots ? 1 : 0,
+		  $whitelist ? 1 : 0,
+		  $hotlist ? 1 : 0,
+		  $valet ? 1 : 0);
+  //drupal_set_message($sql);
+  $db = new PDO("sqlite:".$db_name);
+  if (!$db->exec($sql)) {
+    drupal_set_message("Not able to write to DB", 'error');
+    return 1;
+  }
+  $id = $db->lastInsertId();
+  return 0;
+}
+
+
+
+// Return 0 on success, otherwise 1 
+function chdbpatrol_update_patroller($id, $password, $comment,
+				     $session, $idle,
+				     $tickets, $boots, $whitelist, $hotlist,
+				     $valet) {
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Perform DB command
+  $sql = "UPDATE patroller_table SET ";
+  $sql .= sprintf("Password='%s',Comment='%s'", $password, $comment);
+  $sql .= sprintf(",SessionMinutes=%d,IdleMinutes=%d", $session, $idle);
+  $sql .= sprintf(",Tickets=%d,Boots=%d,Whitelist=%d,Hotlist=%d,Valet=%d",
+		  $tickets ? 1 : 0,
+		  $boots ? 1 : 0,
+		  $whitelist ? 1 : 0,
+		  $hotlist ? 1 : 0,
+		  $valet ? 1 : 0);
+  $sql .= sprintf(" WHERE Id=%d", $id);
+  //drupal_set_message($sql);
+  if (!$db->exec($sql)) {
+    drupal_set_message("Not able to write to DB", 'error');
+    return 1;
+  }
+  return 0;
+}
+
+
+
+// Return 0 on success, otherwise 1 
+function chdbpatrol_update_patroller_contact($id, $name, $address, $contact_info) {
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Perform DB command
+  $sql = "UPDATE patroller_table SET ";
+  $sql .= sprintf("Name='%s',Address='%s',ContactInfo='%s' WHERE Id=%d",
+		  $name, $address, $contact_info, $id);
+  if (!$db->exec($sql)) {
+    drupal_set_message("Not able to write to DB", 'error');
+    return 1;
+  }
+  return 0;
+}
+
+
+
+// Return 0 on success, otherwise 1 
+function chdbpatrol_suspend_patroller($id, $suspended = TRUE) {
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Perform DB command
+  $sql = sprintf("UPDATE patroller_table SET Suspended=%d WHERE Id=%d",
+		 $suspended ? 1 : 0, $id);
+  if (!$db->exec($sql)) {
+    drupal_set_message("Not able to write to DB", 'error');
+    return 1;
+  }
+  return 0;
+}
+
+
+
+// Return 0 on success, otherwise 1 
+function chdbpatrol_delete_patroller_id($id) {
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Perform DB command
+  $sql = sprintf("DELETE FROM patroller_table WHERE Id=%d",
+		 $id);
+  //drupal_set_message($sql);
+  if (!$db->exec($sql)) {
+    drupal_set_message("Not able to write to DB", 'error');
+    return 1;
+  }
+  return 0;
+}
+
+
+
+/****************  patroller_property_table  *************** */
+
+
+
+function chdbpatrol_get_property_patrollers($company_id, $property_id) {
+  $entries = array();
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return $entries;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return $entries;
+  }
+  // Perform DB command
+  $sql = "SELECT * FROM patroller_property_table WHERE ";
+  $sql .= sprintf("CompanyId='%s' AND PropertyId='%s'",
+		  $company_id, $property_id);
+  //drupal_set_message($sql);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries[] = $entry;
+  }
+  return $entries;
+}
+
+
+
+function chdbpatrol_get_patroller_properties($company_id, $patroller_id) {
+  $entries = array();
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return $entries;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return $entries;
+  }
+  // Perform DB command
+  $sql = "SELECT * FROM patroller_property_table WHERE ";
+  $sql .= sprintf("CompanyId='%s' AND PatrollerId='%s'",
+		  $company_id, $patroller_id);
+  //drupal_set_message($sql);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries[] = $entry;
+  }
+  return $entries;
+}
+
+
+
+// Insert a new entry
+// Return 0 on success, otherwise 1
+function chdbpatrol_insert_patroller_property($patroller_id, $property_id,
+					      $company_id, &$id) {
+  $db_name = getenv('APPS_LPMS_AGENT_DB'); //print_r($db_name);
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  $sql = "INSERT INTO patroller_property_table (PatrollerId,PropertyId,CompanyId) ";
+  $sql .= sprintf("VALUES ('%s','%s','%s')",
+		  $patroller_id, $property_id, $company_id);
+  //drupal_set_message($sql);
+  try {
+    $res = $db->exec($sql);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  $id = $db->lastInsertId();
+  return 0;
+}
+
+
+
+// Return 0 on success, otherwise 1
+function chdbpatrol_delete_patroller_property($company_id, $patroller_id) {
+  // Find location of SQLite database
+  $db_name = getenv('APPS_LPMS_AGENT_DB');
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Perform DB command
+  $sql = "DELETE FROM patroller_property_table";
+  $sql .= sprintf(" WHERE CompanyId='%s' AND PatrollerId='%s'",
+		 $company_id, $patroller_id);
+  //drupal_set_message($sql);
+  try {
+    $res = $db->exec($sql);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  return 0;
+}
+
+
+
+/****************  poll_table  *************** */
+
+
+
+// Insert a new entry
+// Return 0 on success, otherwise 1
+function chdbpatrol_insert_patroller_poll($company_id, $patroller_id) {
+  $db_name = getenv('APPS_LPMS_AGENT_DB'); //print_r($db_name);
+  if ($db_name == FALSE) {
+    drupal_set_message("Missing HTTP environment for AGENT database!!!", 'error');
+    return 1;
+  }
+  // connect to SQLite database
+  try {
+    $db = new PDO("sqlite:".$db_name);
+  } catch(PDOException $e) {
+    drupal_set_message($e->getMessage(), 'error');
+    return 1;
+  }
+  // Retrieve the AgentId's associated with the patroller
+  $entries = array();
+  $sql = "SELECT AgentId FROM agent_property_table AS ap ";
+  $sql .= "INNER JOIN patroller_property_table AS pp ";
+  $sql .= "ON ap.PropertyId=pp.PropertyId WHERE ";
+  $sql .= sprintf("pp.PatrollerId='%s' AND pp.CompanyId='%s'",
+		  $patroller_id, $company_id);
+  //drupal_set_message($sql);
+  foreach ($db->query($sql, PDO::FETCH_ASSOC) as $entry) {
+    $entries[] = $entry;
+  }
+  // Insert the poll
+  foreach ($entries as $entry) {
+    $agent_id = $entry['AgentId'];
+    $sql = "INSERT INTO poll_table (AgentId,Patroller) ";
+    $sql .= sprintf("VALUES ('%s',1)", $agent_id);
+    //drupal_set_message($sql);
+    try {
+      $res = $db->exec($sql);
+    } catch(PDOException $e) {
+      drupal_set_message($e->getMessage(), 'error');
+      return 1;
+    }
+  }
+  return 0;
+}
+
+
+

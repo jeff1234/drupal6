@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Alerts
+description = Alerts management module
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

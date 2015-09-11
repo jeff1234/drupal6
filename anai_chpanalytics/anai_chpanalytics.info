@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Analytics
+description = Analytics module
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Boots
+description = Boot management module
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

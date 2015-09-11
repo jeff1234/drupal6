@@ -1,0 +1,776 @@
+<?php
+// $Id$
+require_once("anai_chpboots.inc");
+
+
+/**
+ * @file
+ * ANAI CHP Boots
+ *
+ * Boot management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpboots_perm() {
+  return array('anai chp add boots',
+	       'anai chp edit boots',
+	       'anai chp list boots',
+	       'anai chp operate boots',
+	       'anai chp delete boots');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpboots_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpboots_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+    );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpboots_menu() {
+  $items = array();
+  $items['chpbootsadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpboots_add_form'),
+     'access arguments' => array('anai chp add boots'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpbootslist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpboots_list_form'),
+     'access arguments' => array('anai chp list boots'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpbootspopup/%'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpboots_popup_form', 1),
+     'access arguments' => array('anai chp list boots'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Boots add
+ ********** Address: chpbootsadd
+ ********** Access:  'anai chp add boots'
+ *********/
+
+
+
+function chpboots_add_form($form_state) {
+  drupal_set_title(t('Add new boot device'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+
+  if (!isset($form_state['storage']['ajax']['BootId'])) {
+    $form_state['storage']['ajax']['BootId'] = '';
+  }
+  $form['ajax']['BootId'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Boot id'),
+	  '#maxlength' => 20,
+	  '#default_value' => $form_state['storage']['ajax']['BootId']);
+
+  $form['ajax']['Info'] =
+    array('#value' => 
+	  t('Note: This option is only used to register a new boot device in your warehouse.').'<p><p>');
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpboots_add_form_validate_save'),
+	  '#submit' => array('chpboots_add_form_submit'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpboots_add_form_submit_back'));
+
+  return $form;
+}
+
+function chpboots_add_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpbootslist';
+}
+
+function chpboots_add_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['ajax']['BootId'])) {
+    form_set_error('ajax][BootId', t('Boot Id field is required.'));
+    return;
+  }
+
+  if (chdbboot_boot_exists
+      ($form_state['values']['ajax']['CompanyId'],
+       $form_state['values']['ajax']['BootId'])) {
+    form_set_error('ajax][BootId', t('Boot Id already exists.'));
+    return;
+  }
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chpboots_add_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    if (chdbboot_insert_new_boot
+	($form_state['values']['ajax']['CompanyId'],
+	 check_plain($form_state['values']['ajax']['BootId']),
+	 $id)) {
+      drupal_set_message('Could not insert new boot', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpbootslist';
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Boots list
+ ********** Address: chpbootslist
+ ********** Access:  'anai chp list boots'
+ *********/
+
+
+
+function chpboots_list_form($form_state) {
+  if ($form_state['storage']['detailed_edit']) {
+    return chpboots_list_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Boots'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['submit'] = 'chpboots_list_form_submit_back';
+  if (user_access('anai chp add boots')) {
+    $settings['buttons']['add']['title'] = t('Add new device');
+    $settings['buttons']['add']['submit'] = 'chpboots_list_form_submit_add';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+  $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+  $enforcement_id = $policy['data']['EnforcementId'];
+
+  $entries = chdbboot_get_boots($company_id, $enforcement_id);
+
+  if (empty($entries)) {
+    $form['ajax']['empty'] = array('#value' => '<p>'.t('Empty. No boots registered.').'<p>');
+  } else {
+    $form['ajax']['list'] = chpboots_list_table_form($entries);
+  }
+
+  return $form;
+}
+
+function chpboots_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpbootsadd';
+}
+
+function chpboots_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpboots_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpboots_list_table');
+
+  if (user_access('anai chp edit boots') or
+      user_access('anai chp operate boots')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $entry) {
+    $form['db']['idd_'.$looper] = array('#type' => 'hidden', '#value' => $entry['Id']);
+    $form['db']['boot_'.$looper] = array('#value' => decode_entities($entry['BootId']));
+    $form['db']['inuse_'.$looper] = array('#value' => $entry['Active'] ? 'Yes' : 'No');
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['Time']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    if ($entry['Active']) {
+      $form['db']['patroller_'.$looper] = array('#value' => $entry['PatrollerId']);
+    } else {
+      $form['db']['patroller_'.$looper] = array('#value' => '');
+    }
+
+    if ($entry['Active']) {
+      $form['db']['lpn_'.$looper] =
+	array('#value' =>
+	      l($entry['LPN'],
+		'chpbootspopup/'.$entry['Id'],
+		array('attributes' => array('class' => 'popups'))));
+    } else {
+      $form['db']['patroller_'.$looper] = array('#value' => '');
+    }
+
+    if ($entry['Active'] and strcmp($entry['Comment'], 'None')) {
+      $form['db']['comment_'.$looper] =
+	array('#value' => decode_entities($entry['Comment']));
+    } else {
+      $form['db']['comment_'.$looper] = array('#value' => '');
+    }
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$entry['Id'],
+	      '#submit' => array('chpboots_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpboots_list_table($form) {
+  // Table Header
+  $header = array(t('Boot'), t('Mounted'), t('Time'), t('By'), t('LPN'), t('Comment'), '');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'boot_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('boot_'));
+    $rows[] = array(drupal_render($form['boot_'.$looper]),
+		    drupal_render($form['inuse_'.$looper]),
+		    drupal_render($form['time_'.$looper]),
+		    drupal_render($form['patroller_'.$looper]),
+		    drupal_render($form['lpn_'.$looper]),
+		    drupal_render($form['comment_'.$looper]),
+		    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+		    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpboots_list_edit_form($form_state) {
+  if (isset($form_state['storage']['confirm_delete'])) {
+    return confirm_form($form, 'Are you sure?', 'chpbootslist',
+  			'The boot will be deleted permanently from the system.');
+  }
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $boot = chdbboot_get_boot_id($id);
+  $company_id = $boot['CompanyId'];
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  drupal_set_title(t('Edit boot - BOOT',
+		     array('BOOT' => decode_entities($boot['BootId']))));
+
+  // TBD for renaming the BootId
+
+  /* if (user_access('anai chp edit boots')) { */
+  /*   if (!isset($form_state['storage']['ajax']['BootId'])) { */
+  /*     $form_state['storage']['ajax']['BootId'] = */
+  /* 	decode_entities($boot['BootId']); */
+  /*   } */
+  /*   $form['ajax']['BootId'] = */
+  /*     array('#type' => 'textfield', */
+  /* 	    '#title' => t('Boot id'), */
+  /* 	    '#maxlength' => 20, */
+  /* 	    '#disabled' => $boot['Active'], */
+  /* 	    '#default_value' => $form_state['storage']['ajax']['BootId']); */
+  /* } */
+
+  if (user_access('anai chp operate boots')) {
+    if (!isset($form_state['storage']['ajax']['Active'])) {
+      $form_state['storage']['ajax']['Active'] = $boot['Active'];
+    }
+    $form['ajax']['Active'] =
+      array('#type' => 'checkbox',
+	    '#title' => t('Mounted to vehicle'),
+	    '#default_value' => $form_state['storage']['ajax']['Active'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+
+    if ($form_state['storage']['ajax']['Active']) {
+
+      // Create property options
+      $options = array();
+      foreach (chpprop_retrieve_properties($user->uid, $company_id) as $property_id => $property) {
+	$options[$property_id] =
+	  decode_entities($property['data']['Alias']).', '.
+	  decode_entities($property['data']['Street']).', '.
+	  decode_entities($property['data']['City']);
+      }
+
+      // Layout property options
+      if (!isset($form_state['storage']['ajax']['PropertyId'])) {
+	$form_state['storage']['ajax']['PropertyId'] = key($options);
+      }
+      $form['ajax']['PropertyId'] =
+	array('#type' => 'select',
+	      '#options' => $options,
+	      '#disabled' => $boot['Active'],
+	      '#title' => t('Property'),
+	      '#default_value' => $form_state['storage']['ajax']['PropertyId'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+
+      // Create lot options
+      $options = array();
+      foreach (chpprop_retrieve_policies($user->uid, $company_id) as $property_id => $values) {
+	if ($property_id !== $form_state['storage']['ajax']['PropertyId']) {
+	  continue;
+	}
+	foreach ($values as $lot_id => $policy) {
+	  if (empty($policy['EnforcementId'])) {
+	    continue;
+	  }
+	  $enforcement = chdbprop_get_enforcement($policy['EnforcementId']);
+	  if ($enforcement['Booting']) {
+	    $options[$lot_id] = decode_entities($lot['data']['Alias']);
+	  }
+	}
+      }
+
+      if (empty($options)) {
+	$form['ajax']['error'] =
+	  array('#value' => '<p>'.t('Booting enforcement is not set on property.').'<p>');
+	$form['ajax']['cancel'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai').'/cancel.png',
+		'#submit' => array('chpboots_list_edit_form_submit_back'));
+	return $form;
+      }
+
+      // Layout lot options
+      if (!isset($form_state['storage']['ajax']['LotId'])) {
+	$form_state['storage']['ajax']['LotId'] = key($options);
+      }
+      $form['ajax']['LotId'] =
+	array('#type' => 'select',
+	      '#options' => $options,
+	      '#disabled' => $boot['Active'],
+	      '#title' => t('Lot'),
+	      '#default_value' => $form_state['storage']['ajax']['LotId'],
+	      '#ahah' => array('event' => 'change',
+			       'path' => ahah_helper_path(array('ajax')),
+			       'wrapper' => 'ajax-wrapper'));
+
+      // Create patroller options
+      $patroller_options = array();
+      $patrollers = chpprop_retrieve_patrollers($user->uid, $company_id);
+      foreach ($patrollers as $patroller_id => $patroller) {
+	$patroller_options[$patroller_id] = $patroller_id;
+      }
+      $patrollers = NULL;
+
+      if (empty($patroller_options)) {
+	$patroller_options['Unspecified'] = t('Unspecified');
+      }
+
+      // Layout patroller options
+      if (!isset($form_state['storage']['ajax']['PatrollerId'])) {
+	$form_state['storage']['ajax']['PatrollerId'] = key($patroller_options);
+      }
+      $form['ajax']['PatrollerId'] =
+	array('#type' => 'select',
+	      '#options' => $patroller_options,
+	      '#title' => t('Patroller'),
+	      '#disabled' => $boot['Active'],
+	      '#default_value' => $form_state['storage']['ajax']['PatrollerId']);
+
+      $settings = array();
+      $settings['tag'] = 'ajax';
+      if ($boot['Active']) {
+	$settings['default']['LPN'] = $boot['LPN'];
+	$settings['default']['Make'] = $boot['Make'];
+	$settings['default']['Model'] = $boot['Model'];
+	$settings['default']['Color'] = $boot['Color'];
+	$settings['disabled']['LPN'] = $boot['Active'];
+	$settings['disabled']['Make'] = $boot['Active'];
+	$settings['disabled']['Model'] = $boot['Active'];
+	$settings['disabled']['Color'] = $boot['Active'];
+      }
+      if (chpprop_produce_vehicle(&$form, &$form_state, $settings)) {
+	return $form;
+      }
+
+      if (!isset($form_state['storage']['ajax']['Comment'])) {
+	$form_state['storage']['ajax']['Comment'] =
+	  $boot['Active'] ? decode_entities($boot['Comment']) : '';
+      }
+      $form['ajax']['Comment'] =
+	array('#type' => 'textarea',
+	      '#title' => t('Comment'),
+	      '#maxlength' => 120,
+	      '#description' => t('(Maximum 120 characters)'),
+	      '#disabled' => $boot['Active'],
+	      '#default_value' => $form_state['storage']['ajax']['Comment']);
+
+      if (!isset($form_state['storage']['ajax']['TicketIdUsed'])) {
+	$form_state['storage']['ajax']['TicketIdUsed'] =
+	  ($boot['Active'] and strlen($boot['TicketId']) > 0) ? 1 : 0;
+      }
+      $form['ajax']['TicketIdUsed'] =
+	array('#type' => 'checkbox',
+	      '#title' => t('Associate with a ticket'),
+	      '#disabled' => $boot['Active'],
+	      '#default_value' => $form_state['storage']['ajax']['TicketIdUsed']);
+
+      if (!isset($form_state['storage']['ajax']['TicketId'])) {
+	$form_state['storage']['ajax']['TicketId'] =
+	  ($boot['Active'] and strlen($boot['TicketId']) > 0) ? $boot['TicketId'] : '';
+      }
+      $form['ajax']['TicketId'] =
+	array('#type' => 'textfield',
+	      '#title' => t('Ticket id'),
+	      '#disabled' => $boot['Active'],
+	      '#default_value' => $form_state['storage']['ajax']['TicketId']);
+    } // Active
+  } // Role
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+  	  '#validate' => array('chpboots_list_edit_form_validate_save'),
+	  '#submit' => array('chpboots_list_form_submit'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpboots_list_edit_form_submit_back'));
+
+  if (user_access('anai chp delete boots')) {
+    $form['ajax']['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+	    '#submit' => array('chpboots_list_edit_form_submit_delete'));
+  }
+  return $form;
+}
+
+function chpboots_list_edit_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpbootslist';
+}
+
+function chpboots_list_edit_form_submit_delete($form, &$form_state) {
+  $form_state['storage']['confirm_delete'] = TRUE;
+}
+
+function chpboots_list_edit_form_validate_save($form, &$form_state) {
+  if (isset($form['ajax']['BootId']) and
+      empty($form_state['values']['ajax']['BootId'])) {
+    form_set_error('ajax][BootId', 'Boot id field is required.');
+    return;
+  }
+  if ($form_state['values']['ajax']['Active']) {
+    if (empty($form_state['values']['ajax']['PatrollerId'])) {
+      form_set_error('ajax][PatrollerId', t('Employee number field is required.'));
+      return;
+    }
+    if (!preg_match('/^\d+$/', $form_state['values']['ajax']['PatrollerId'])) {
+      form_set_error('ajax][PatrollerId', t('Employee number must be a numeric value.'));
+      return;
+    }
+  }
+  if ($form_state['values']['ajax']['Active']) {
+    if (empty($form_state['values']['ajax']['LPN'])) {
+      form_set_error('ajax][LPN', 'License plate number field is required.');
+      return;
+    }
+    if (preg_match('/\s/', $form_state['values']['ajax']['LPN'])) {
+      form_set_error('ajax][LPN', 'License plate number shall be given without any spaces.');
+      return;
+    }
+  }
+  if ($form_state['values']['ajax']['Active']) {
+    if (empty($form_state['values']['ajax']['Model'])) {
+      form_set_error('ajax][Model', 'Model field is required.');
+      return;
+    }
+  }
+  if ($form_state['values']['ajax']['Active']) {
+    if (empty($form_state['values']['ajax']['Color'])) {
+      form_set_error('ajax][Color', 'Color field is required.');
+      return;
+    }
+  }
+  if ($form_state['values']['ajax']['Active']) {
+    if (empty($form_state['values']['ajax']['TicketId']) and
+	$form_state['values']['ajax']['TicketIdUsed']) {
+      form_set_error('ajax][TicketId', 'Ticket id field is required.');
+      return;
+    }
+  }
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chpboots_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    if (chdbboot_delete_boot_id($id)) {
+      drupal_set_message('Could not delete boot', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpbootslist';
+    return;
+  }
+  if ($form_state['storage']['save']) {
+    $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+    $boot = chdbboot_get_boot_id($id);
+    $company_id = $boot['CompanyId'];
+    $boot_id = $boot['BootId'];
+
+    $property_id = $form_state['values']['ajax']['PropertyId'];
+    $lot_id = $form_state['values']['ajax']['LotId'];
+
+    $active = $form_state['values']['ajax']['Active'];
+
+    // Retrieve from DB when form is static
+    if (!$active) {
+      $patroller_id = $boot['PatrollerId'];
+      $ticket_id = $boot['TicketId'];
+      $lpn = $boot['LPN'];
+    } else {
+      $patroller_id = $form_state['values']['ajax']['PatrollerId'];
+      $ticket_id = $form_state['values']['ajax']['TicketId'];
+      $lpn = check_plain($form_state['values']['ajax']['LPN']);
+    }
+
+    $make = check_plain($form_state['values']['ajax']['Make']);
+    $model = check_plain($form_state['values']['ajax']['Model']);
+    $color = check_plain($form_state['values']['ajax']['Color']);
+
+    // Handle renaming of the boot id
+    if (isset($form_state['values']['ajax']['BootId'])) {
+      if (chdbboot_update_boot_id
+	  ($id,
+	   $form_state['values']['ajax']['BootId'])) {
+	drupal_set_message('Could not update boot id', 'error');
+	return;
+      }
+      $boot_id = $form_state['values']['ajax']['BootId'];
+    }
+
+    // Toggle active state
+    if ($active != $boot['Active']) {
+      if (chdbboot_update_active
+	  ($id, $active)) {
+	drupal_set_message('Could not update active state', 'error');
+	return;
+      }
+    }
+
+    // Update vehicle info
+    if (isset($form_state['values']['ajax']['LPN'])) {
+      if (chdbboot_update_assignment
+	  ($id,
+	   $patroller_id,
+	   $property_id, $lot_id,
+	   $lpn, $make, $model, $color,
+	   check_plain($form_state['values']['ajax']['Comment']))) {
+	drupal_set_message('Could not update assignment', 'error');
+	return;
+      }
+    }
+
+    if ($form_state['values']['ajax']['TicketIdUsed']) {
+      if (isset($form_state['values']['ajax']['TicketId'])) {
+	if (chdbboot_update_ticket_id
+	    ($id, $ticket_id)) {
+	  drupal_set_message('Could not update ticket id', 'error');
+	  return;
+	}
+      }
+    }
+
+    // Update frequent users every time activating boot on a new vehicle
+    if ($active and !$boot['Active']) {
+      $freq_user = chdbprop_get_freq_user($form_state['values']['ajax']['LPN']);
+      if (sizeof($freq_user) == 0) {
+	if (chdbprop_insert_freq_user
+	    ($property_id,
+	     $lpn, $make, $model, $color)) {
+	  drupal_set_message('Could not insert freq user', 'error');
+	  return;
+	}
+      } else {
+	if (chdbprop_update_freq_user
+	    ($property_id,
+	     $lpn, $make, $model, $color)) {
+	  drupal_set_message('Could not update freq user', 'error');
+	  return;
+	}
+      }
+    }
+
+    // Update stats
+    if ($active and !$boot['Active']) {
+      if (chdbboot_stats_new
+	  ($company_id, $property_id, $lot_id,
+	   $boot_id, $patroller_id, $ticket_id, $lpn)) {
+	drupal_set_message('Could not insert active boot stats', 'error');
+	return;
+      }
+    } elseif (!$active and $boot['Active']) {
+      if (chdbboot_stats_remove
+	  ($company_id, $property_id, $lot_id,
+	   $boot_id, $patroller_id, $ticket_id, $lpn)) {
+	drupal_set_message('Could not insert active boot stats', 'error');
+	return;
+      }
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpbootslist';
+    return;
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Boots list popup dialog
+ ********** Address: chpbootspopup
+ ********** Access:  'anai chp list boots'
+ *********/
+
+
+
+function chpboots_popup_form($form_state, $id) {
+
+  $boot = chdbboot_get_boot_id($id);
+  $boot_id = $boot['BootId'];
+  $property_id = $boot['PropertyId'];
+  $lot_id = $boot['LotId'];
+  $property = chdbprop_get_property($property_id);
+  $policy = chdbprop_get_policy($property_id, $lot_id);
+  // Table Header
+  $header = array();
+  // Table Row
+  $rows[] = array('ajax', $property['Alias']);
+  $rows[] = array('Lot', $policy['Alias']);
+  $created = chpuser_datetime_utc_to_usertimezone($boot['Time']);
+  $rows[] = array('Mounted at', $created->format("M j,y H:i"));
+  $rows[] = array('Mounted by', $boot['PatrollerId']);
+  $rows[] = array('LPN', $boot['LPN']);
+  $rows[] = array('Make', $boot['Make']);
+  $rows[] = array('Model', $boot['Model']);
+  $rows[] = array('Color', $boot['Color']);
+  if (strcmp($boot['TicketId'], 'None')) {
+    $rows[] = array('TicketId', $boot['TicketId']);
+  } else {
+    $rows[] = array('TicketId', '');
+  }
+  $rows[] = array('Comment', $boot['Comment']);
+  $table = theme_table($header, $rows);
+  $form['info'] = array('#value' => $table);
+  return $form;
+}
+
+
+

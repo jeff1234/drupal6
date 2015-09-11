@@ -1,0 +1,89 @@
+<?php
+// $Id$
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * ANAI Cloud computing main module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_perm() {
+  return array('access anai support content');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_menu() {
+  $items = array();
+  $items['anaisupportinfo'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('anai_support_form'),
+     'access arguments' => array('access anai support content'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+function anai_support_form($form_state) {
+  $form['anai'] = array('#type' => 'fieldset', '#title' => t('TBD'));
+  $form['anai']['info'] = array('#value' => t('Text'));
+  $form['info'] = array('#value' => t('Text outside'));
+
+  return $form;
+}
+
+
+
+function anai_dbg($var, $title = '') {
+  if (empty($title)) {
+    drupal_set_message('<pre>'.var_export($var, TRUE).'</pre>', 'warning');
+  } else {
+    drupal_set_message($title.':<pre>'.var_export($var, TRUE).'</pre>', 'warning');
+  }
+}
+
+
+

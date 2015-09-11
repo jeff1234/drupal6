@@ -1,0 +1,465 @@
+<?php
+require_once("anai_chpoccupancy.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * ANAI Cloud computing main module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpoccupancy_perm() {
+  return array('anai chp list occupancy',
+	       'anai chp edit occupancy options',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpoccupancy_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpoccu_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpoccupancy_menu() {
+  $items = array();
+  $items['chpoccuopt'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpoccu_options_form'),
+     'access arguments' => array('anai chp edit occupancy options'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpoccu'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpoccu_list_form'),
+     'access arguments' => array('anai chp list occupancy'),
+     'type' => MENU_CALLBACK,
+     );
+ return $items;
+}
+
+
+
+/**********
+ ********** Options
+ ********** Address: chpoccuopt
+ ********** Access:  'anai chp edit occupancy options'
+ *********/
+
+
+function chpoccu_options_form($form_state) {
+  drupal_set_title(t('Occupancy options'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $params = chdboccu_get_params($property_id, $lot_id);
+
+  // Layout GraceIn
+  if ($form_state['storage']['ajax']['PropertyChanged'] or
+      $form_state['storage']['ajax']['LotChanged']) {
+    unset($form_state['storage']['ajax']['GraceIn']);
+  }
+  if (!isset($form_state['storage']['ajax']['GraceIn'])) {
+    if (!empty($params['GraceIn'])) {
+      $form_state['storage']['ajax']['GraceIn'] = $params['GraceIn'];
+    } else {
+      $form_state['storage']['ajax']['GraceIn'] = 0;
+    }
+  }
+  $form['ajax']['GraceIn'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Entry grace minutes'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['ajax']['GraceIn']);
+
+  // Layout GraceOut
+  if ($form_state['storage']['ajax']['PropertyChanged'] or
+      $form_state['storage']['ajax']['LotChanged']) {
+    unset($form_state['storage']['ajax']['GraceOut']);
+  }
+  if (!isset($form_state['storage']['ajax']['GraceOut'])) {
+    if (!empty($params['GraceOut'])) {
+      $form_state['storage']['ajax']['GraceOut'] = $params['GraceOut'];
+    } else {
+      $form_state['storage']['ajax']['GraceOut'] = 0;
+    }
+  }
+  $form['ajax']['GraceOut'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Exit grace minutes'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['ajax']['GraceOut']);
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpoccu_options_form_validate_save'),
+	  '#submit' => array('chpoccu_options_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpoccu_options_form_submit_cancel'));
+
+  return $form;
+}
+
+function chpoccu_options_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpoccu';
+}
+
+function chpoccu_options_form_validate_save($form, &$form_state) {
+  if (0 == strlen($form_state['values']['ajax']['GraceIn'])) {
+    form_set_error('ajax][GraceIn', 'Entry grace minutes field is required.');
+    return;
+  }
+  if (0 == strlen($form_state['values']['ajax']['GraceOut'])) {
+    form_set_error('ajax][GraceOut', 'Exit grace minutes field is required.');
+    return;
+  }
+  if (!preg_match('/^\d+$/', $form_state['values']['ajax']['GraceIn'])) {
+    form_set_error('ajax][GraceIn', 'Entry grace minutes must be a non-negative number.');
+    return;
+  }
+  if (!preg_match('/^\d+$/', $form_state['values']['ajax']['GraceOut'])) {
+    form_set_error('ajax][GraceOut', 'Exit grace minutes must be a non-negative number.');
+    return;
+  }
+}
+
+function chpoccu_options_form_submit_save($form, &$form_state) {
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+  $lot_id = $form_state['values']['ajax']['LotId'];
+  $grace_in = $form_state['values']['ajax']['GraceIn'];
+  $grace_out = $form_state['values']['ajax']['GraceOut'];
+
+  $params = chdboccu_get_params($property_id, $lot_id);
+  if (empty($params)) {
+    if (chdboccu_insert_params
+	($property_id,
+	 $lot_id,
+	 $grace_in,
+	 $grace_out)) {
+      drupal_set_message('Could not insert occupancy params', 'error');
+      return;
+    }
+  } else {
+    if (chdboccu_update_params
+	($property_id,
+	 $lot_id,
+	 $grace_in,
+	 $grace_out)) {
+      drupal_set_message('Could not update occupancy params', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpoccu';
+}
+
+
+
+/**********
+ ********** Occupancy
+ ********** Address: chpoccu
+ ********** Access:  'anai chp list occupancy'
+ *********/
+
+
+
+function chpoccu_list_form($form_state) {
+  drupal_set_title(t('Occupancy'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chpoccu_list_form_submit_back';
+  if (user_access('anai chp edit occupancy options')) {
+    $settings['buttons']['options']['submit'] = 'chpoccu_list_form_submit_options';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $params = chdboccu_get_params($property_id, $lot_id);
+  if (empty($params)) {
+    drupal_set_message(t('This lot is missing grace period configuration'), 'warning');
+  }
+
+  $options = array();
+  $options['Compliant'] = t('Compliant');
+  $options['NonCompliant'] = t('Non-Compliant');
+  $options['Pending'] = t('Grace exempt');
+  $options['All'] = t('All');
+
+  if (!isset($form_state['storage']['ajax']['Type'])) {
+    $form_state['storage']['ajax']['Type'] = key($options);
+  }
+  $form['ajax']['Type'] =
+    array('#type' => 'radios',
+	  '#title' => t('Type'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Type'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if (!isset($form_state['storage']['ajax']['Expanded'])) {
+    $form_state['storage']['ajax']['Expanded'] = FALSE;
+  }
+  $form['ajax']['Expanded'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('Expand events'),
+	  '#default_value' => $form_state['storage']['ajax']['Expanded'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  $entries = array();
+
+  if ($form_state['storage']['ajax']['Type'] === 'Compliant') {
+    foreach (chdboccu_get_all_compliant($property_id, $lot_id) as $entry) {
+      if ($form_state['storage']['ajax']['Expanded']) {
+	$entries[$entry['EventId']][] = $entry;
+      } elseif (!isset($entries[$entry['EventId']])) {
+	$entries[$entry['EventId']][0] = $entry;
+      } elseif ($entry['History'] < $entries[$entry['EventId']][0]['History']) {
+	foreach ($entry as $key => $value) {
+	  if (0 < strlen($value)) {
+	    $entries[$entry['EventId']][0][$key] = $value;
+	  }
+	}
+      }
+    }
+  } elseif ($form_state['storage']['ajax']['Type'] === 'NonCompliant') {
+    foreach (chdboccu_get_all_non_compliant($property_id, $lot_id) as $entry) {
+      if ($form_state['storage']['ajax']['Expanded']) {
+	$entries[$entry['EventId']][] = $entry;
+      } elseif (!isset($entries[$entry['EventId']])) {
+	$entries[$entry['EventId']][0] = $entry;
+      } elseif ($entry['History'] < $entries[$entry['EventId']][0]['History']) {
+	foreach ($entry as $key => $value) {
+	  if (0 < strlen($value)) {
+	    $entries[$entry['EventId']][0][$key] = $value;
+	  }
+	}
+      }
+    }
+  } elseif ($form_state['storage']['ajax']['Type'] === 'Pending') {
+    foreach (chdboccu_get_all_pending($property_id, $lot_id) as $entry) {
+      if ($form_state['storage']['ajax']['Expanded']) {
+	$entries[$entry['EventId']][] = $entry;
+      } elseif (!isset($entries[$entry['EventId']])) {
+	$entries[$entry['EventId']][0] = $entry;
+      } elseif ($entry['History'] < $entries[$entry['EventId']][0]['History']) {
+	foreach ($entry as $key => $value) {
+	  if (0 < strlen($value)) {
+	    $entries[$entry['EventId']][0][$key] = $value;
+	  }
+	}
+      }
+    }
+  } elseif ($form_state['storage']['ajax']['Type'] === 'All') {
+    foreach (chdboccu_get_all_occupancy($property_id, $lot_id) as $entry) {
+      if ($form_state['storage']['ajax']['Expanded']) {
+	$entries[$entry['EventId']][] = $entry;
+      } elseif (!isset($entries[$entry['EventId']])) {
+	$entries[$entry['EventId']][0] = $entry;
+      } elseif ($entry['History'] < $entries[$entry['EventId']][0]['History']) {
+	foreach ($entry as $key => $value) {
+	  if (0 < strlen($value)) {
+	    $entries[$entry['EventId']][0][$key] = $value;
+	  }
+	}
+      }
+    }
+  }
+
+  $now = chpuser_datetime_utc_to_usertimezone('now');
+  $form['ajax']['time'] =
+    array('#value' => $now->format("D, M j, Y H:i:s"));
+
+  $form['ajax']['Info'] =
+    array('#value' => '<p>'.t('Number of vehicles: NUM',
+			      array('NUM' => count($entries))));
+
+  if (!empty($entries)) {
+    $form['ajax']['list'] = chpoccu_list_table_form($entries);
+  }
+
+  return $form;
+}
+
+function chpoccu_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpoccu_list_form_submit_options($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpoccuopt';
+}
+
+function chpoccu_list_table_form($entries) {
+  global $user;
+  $form['db'] = array('#type' => 'markup', '#theme' => 'chpoccu_list_table');
+
+  if (user_access('anai chp edit occupancy')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $event_id => $events) {
+    $form['db']['grp_'.$looper] = array('#value' => $looper + 1);
+    $form['db']['numfrags_'.$looper.'_'.count($events)] =
+      array('#type' => 'hidden', '#value' => '');
+
+    $lot_frags = 0;
+    foreach ($events as $event) {
+      $form['db']['lpn_'.$looper.'_'.$lot_frags] = array('#value' => $event['LPN']);
+
+      if (1 < count($events)) {
+	if (!empty($event['InTime'])) {
+	  $time = chpuser_datetime_utc_to_usertimezone($event['InTime']);
+	  $form['db']['intime_'.$looper.'_'.$lot_frags] =
+	    array('#value' => $time->format("D, M j, Y H:i:s"));
+	} else {
+	  $form['db']['intime_'.$looper.'_'.$lot_frags] = array('#value' => '');
+	}
+      } else {
+	if (!empty($event['AllInTime'])) {
+	  $time = chpuser_datetime_utc_to_usertimezone($event['AllInTime']);
+	  $form['db']['intime_'.$looper.'_'.$lot_frags] =
+	    array('#value' => $time->format("D, M j, Y H:i:s"));
+	} else {
+	  $form['db']['intime_'.$looper.'_'.$lot_frags] = array('#value' => '');
+	}
+      }
+
+      if (!empty($event['ValidationTime'])) {
+	$time = chpuser_datetime_utc_to_usertimezone($event['ValidationTime']);
+	$form['db']['valtime_'.$looper.'_'.$lot_frags] =
+	  array('#value' => $time->format("D, M j, Y H:i:s"));
+      } else {
+	$form['db']['valtime_'.$looper.'_'.$lot_frags] = array('#value' => '');
+      }
+
+      $form['db']['vali_'.$looper.'_'.$lot_frags] =
+	array('#value' => $event['AllValidation']);
+      $form['db']['source_'.$looper.'_'.$lot_frags] =
+	array('#value' => $event['Source']);
+
+      $lot_frags++;
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpoccu_list_table($form) {
+  // Table Header
+  $header = array('',
+		  t('LPN'),
+		  t('Entry time'),
+		  t('Paid/Validated until'),
+		  t('Validation'),
+		  t('Source'));
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'numfrags_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('numfrags_'));
+    $looper = substr($looper, 0, strpos($looper, '_'));
+    $numfrags = substr($key, strlen('numfrags_'.$looper.'_'));
+
+    $rows[] = array(array('data' => drupal_render($form['grp_'.$looper]),
+			  'rowspan' => $numfrags),
+		    drupal_render($form['lpn_'.$looper.'_0']),
+		    drupal_render($form['intime_'.$looper.'_0']),
+		    drupal_render($form['valtime_'.$looper.'_0']),
+                    drupal_render($form['vali_'.$looper.'_0']),
+                    drupal_render($form['source_'.$looper.'_0']),
+                    );
+    for ($i = 1; $i < $numfrags; $i++) {
+      $rows[] = array(drupal_render($form['lpn_'.$looper.'_'.$i]),
+		      drupal_render($form['intime_'.$looper.'_'.$i]),
+		      drupal_render($form['valtime_'.$looper.'_'.$i]),
+		      drupal_render($form['vali_'.$looper.'_'.$i]),
+		      drupal_render($form['source_'.$looper.'_'.$i]),
+		      );
+    }
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+

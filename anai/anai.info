@@ -1,0 +1,12 @@
+; $Id$
+name = ANAI
+description = ANAI Cloud computing main module
+core = 6.x
+package = ANAI
+dependencies[] = ahah_helper
+dependencies[] = gmap
+dependencies[] = location
+dependencies[] = jquery_ui
+dependencies[] = popups
+dependencies[] = chart
+

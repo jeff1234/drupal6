@@ -1,0 +1,871 @@
+<?php
+// $Id$
+
+
+/**
+ * @file
+ * ANAI CHP Front Page
+ *
+ * Front page
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpfront_perm() {
+  return array('anai chp front page',
+	       'anai chp anonymous front page');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpfront_menu() {
+  $items = array();
+  $items['chpfront'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpfront_form'),
+     'access arguments' => array('anai chp front page'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpanon'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpfront_anon_form'),
+     'access arguments' => array('anai chp anonymous front page'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Front Page
+ ********** Address: chpfront
+ ********** Access:  'anai chp front page'
+ *********/
+
+
+
+function chpfront_form($form_state) {
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['include_property_none'] = TRUE;
+  $settings['include_sticky_management'] = TRUE;
+  $settings['option']['skippropertynotes'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $property_id = $form_state['storage']['ajax']['PropertyId']; //anai_dbg($property_id, '$property_id');
+  $lot_id = $form_state['storage']['ajax']['LotId']; //anai_dbg($lot_id, '$lot_id');
+
+  $num_properties = count($form_state['storage']['ajax']['Properties']);
+
+  $policy = array();
+  $profile = array();
+  $enforcement = array();
+  $equipment = array();
+  if ($property_id !== 'None' and strlen($property_id) > 0 and strlen($lot_id) > 0) {
+    $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+    if (!empty($policy)) {
+      $policy = $policy['data'];
+      $profile_id = $policy['ProfileId'];
+      $enforcement_id = $policy['EnforcementId'];
+      $equipment_id = $policy['EquipmentId'];
+      $profile = chdbprop_get_profile($profile_id);
+      if (!empty($enforcement_id)) {
+	$enforcement = chdbprop_get_enforcement($enforcement_id);
+      }
+      if (!empty($equipment_id)) {
+	$equipment = chdbprop_get_equipment($equipment_id);
+      }
+    }
+  }
+
+  // Property pages
+  $any_button = FALSE;
+  $show = array();
+  $scale = '22%';
+  if (user_access('anai chp list property profiles')) {
+    $any_button = TRUE;
+    $show[] = 'property profiles';
+  }
+  if (user_access('anai chp list properties')) {
+    $any_button = TRUE;
+    $show[] = 'list properties';
+  }
+  if (user_access('anai chp list relations')) {
+    $any_button = TRUE;
+    $show[] = 'property relations';
+  }
+  if (user_access('anai chp view property location map')) {
+    $any_button = TRUE;
+    $show[] = 'view property location map';
+  }
+
+  if (count($show) > 0) {
+    $form['ajax']['property']['center_begin'] =
+      array('#value' => '<center>');
+    $form['ajax']['property'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Properties'));
+    foreach ($show as $ss) {
+      if ($ss === 'property profiles') {
+	$form['ajax']['property']['property_profiles'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpproperties').
+		'/profiles.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_property_profiles'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'list properties') {
+	$form['ajax']['property']['properties_list'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpproperties').
+		'/properties.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_property_list'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'property relations') {
+	$form['ajax']['property']['properties_relations'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpproperties').
+		'/relations.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_property_relations'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'view property location map') {
+	$form['ajax']['property']['properties_map'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpproperties').
+		'/location_map.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_property_map'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+    }
+    $form['ajax']['property']['center_end'] = array('#value' => '</center>');
+  }
+
+  // Permit pages
+  $any_button = FALSE;
+  $show = array();
+  $scale = '22%';
+  if (user_access('anai chp list permit container') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'list permit container';
+  }
+  if (user_access('anai chp add permits') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'add permits';
+  }
+  if (user_access('anai chp list permits') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'list permits';
+  }
+  if (user_access('anai chp search permits') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'search permits';
+  }
+  if (user_access('anai chp early checkout permits') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'checkout permits';
+  }
+  if (user_access('anai chp list valets') and
+      $profile['ValetPolicy']) {
+    $any_button = TRUE;
+    $show[] = 'valets';
+  }
+  if (user_access('anai chp list permit account') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'accounts';
+  }
+  if (user_access('anai chp list permit validation') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'validations';
+  }
+  if (user_access('anai chp view analytics') and
+      ($profile['LongPolicy'] or
+       $profile['ShortPolicy'] or
+       $profile['LongShortPolicy'] or
+       $profile['ValetPolicy'])) {
+    $any_button = TRUE;
+    $show[] = 'analytics';
+  }
+
+  if (count($show) > 0 and $num_properties > 0) {
+    $form['ajax']['permit'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Permits'));
+    $form['ajax']['permit']['center_begin'] =
+      array('#type' => 'hidden',
+	    '#value' => '<center>');
+
+    foreach ($show as $ss) {
+      if ($ss === 'list permit container') {
+	$form['ajax']['permit']['permit_rates'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chppermits').
+		'/containers.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_permit_rates'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'add permits') {
+	$form['ajax']['permit']['permit_add'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chppermits').
+		'/new.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_permit_add'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'list permits') {
+	$form['ajax']['permit']['permit_list'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chppermits').
+		'/list.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_list'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'search permits') {
+	$form['ajax']['permit']['permit_search'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chppermits').
+		'/search.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_permit_search'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'checkout permits') {
+	$form['ajax']['permit']['permit_checkout'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chppermits').
+		'/checkout.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_permit_checkout'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'valets') {
+	$form['ajax']['permit']['valets'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chpvalet').
+		'/valet.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_valets'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'accounts') {
+	$form['ajax']['permit']['accounts'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chppermits').
+		'/accounts.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_accounts'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'validations') {
+	$form['ajax']['permit']['validations'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chppermits').
+		'/validations.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_validations'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'analytics') {
+	$form['ajax']['permit']['analytics'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chpanalytics').
+		'/analytics.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_analytics'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+    }
+    $form['ajax']['permit']['center_end'] =
+      array('#type' => 'hidden', '#value' => '</center>');
+  }
+
+  // Occupancy pages
+  $any_button = FALSE;
+  $show = array();
+  $scale = '22%';
+  if (user_access('anai chp list lanes') and !empty($equipment)) {
+    $any_button = TRUE;
+    $show[] = 'list lanes';
+  }
+  if (user_access('anai chp list devices') and !empty($equipment) and
+      ($equipment['LPR'] or
+       $equipment['InfoBoard'] or
+       $equipment['PAD'])) {
+    $any_button = TRUE;
+    $show[] = 'list devices';
+  }
+  if (user_access('anai chp list occupancy') and !empty($equipment)) {
+    $any_button = TRUE;
+    $show[] = 'list occupancy';
+  }
+  if (user_access('anai chp list hotlist') and !empty($equipment)) {
+    $any_button = TRUE;
+    $show[] = 'list hotlist';
+  }
+
+  if (count($show) > 0) {
+    $form['ajax']['equipment']['center_begin'] = array('#value' => '<center>');
+    $form['ajax']['equipment'] = array('#type' => 'fieldset', '#title' => t('Occupancy'));
+    foreach ($show as $ss) {
+      if ($ss === 'list lanes') {
+	$form['ajax']['equipment']['occupancy lanes'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chplane').'/lanes.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_equipment_lanes'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'list devices') {
+	$form['ajax']['equipment']['occupancy devices'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chpdevice').'/devices.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_equipment_devices'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'list occupancy') {
+	$form['ajax']['equipment']['occupancy list'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chpoccupancy').'/occupancy.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_equipment_occupancy'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'list hotlist') {
+	$form['ajax']['equipment']['hotlist list'] =
+	  array('#type' => 'image_button',
+		'#src' => drupal_get_path('module', 'anai_chphotlist').'/hotlist.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_equipment_hotlist'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+    }
+    $form['ajax']['equipment']['center_end'] = array('#value' => '</center>');
+  }
+
+  // Management pages
+  $any_button = FALSE;
+  $show = array();
+  $scale = '22%';
+  if ((in_array('Admin', array_values($user->roles)) and $user->status) or
+      $user->uid == 1) {
+    $any_button = TRUE;
+    $show[] = 'admin';
+  }
+  if (user_access('anai chp create reports') and $num_properties > 0) {
+    $any_button = TRUE;
+    $show[] = 'create reports';
+  }
+  if (user_access('anai chp list alerts') and $num_properties > 0 and 0) {
+    $any_button = TRUE;
+    $show[] = 'alert list';
+  }
+  if (user_access('anai chp list complaints') and $num_properties > 0) {
+    $any_button = TRUE;
+    $show[] = 'complaint list';
+  }
+  if (user_access('anai chp list tickets') and $num_properties > 0 and
+      !empty($enforcement) and $enforcement['Ticketing']) {
+    $any_button = TRUE;
+    $show[] = 'ticket list';
+  }
+  if (user_access('anai chp list boots') and $num_properties > 0 and
+      !empty($enforcement) and $enforcement['Booting']) {
+    $any_button = TRUE;
+    $show[] = 'boot list';
+  }
+  if (user_access('anai chp list towings') and $num_properties > 0 and
+      !empty($enforcement) and $enforcement['Towing']) {
+    $any_button = TRUE;
+    $show[] = 'towing list';
+  }
+  if (user_access('anai chp list mobiles') and $num_properties > 0 and
+      (!empty($equipment) or
+       (!empty($enforcement) and $enforcement['MobilePolicy']) or
+       ($profile['ValetPolicy'] and $profile['ValUnitsPolicy']))) {
+    $any_button = TRUE;
+    $show[] = 'mobile list';
+  }
+  if (user_access('anai chp list patrollers') and $num_properties > 0 and
+      ((!empty($enforcement) and $enforcement['MobilePolicy']) or
+       ($profile['ValetPolicy'] and $profile['ValUnitsPolicy']))) {
+    $any_button = TRUE;
+    $show[] = 'patroller list';
+  }
+  if (user_access('anai chp list scans') and !empty($equipment) and
+      $equipment['LPR']) {
+    $any_button = TRUE;
+    $show[] = 'scan list';
+  }
+
+  if (count($show) > 0) {
+    $form['ajax']['management']['center_begin'] =
+      array('#value' => '<center>');
+    $form['ajax']['management'] =
+      array('#type' => 'fieldset',
+	    '#title' => t('Management'));
+    foreach ($show as $ss) {
+      if ($ss === 'admin') {
+	$form['ajax']['management']['admin'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpadmin').
+		'/admin.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_admin'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'create reports') {
+	$form['ajax']['management']['reports'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpreports').
+		'/reports.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_reports'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'alert list') {
+	$form['ajax']['management']['alerts'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpalerts').
+		'/alerts.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_alerts'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'complaint list') {
+	$form['ajax']['management']['complaints'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpcomplaints').
+		'/notes.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_complaints'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'ticket list') {
+	$form['ajax']['management']['tickets'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chptickets').
+		'/tickets.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_tickets'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'boot list') {
+	$form['ajax']['management']['boots'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpboots').
+		'/boots.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_boots'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'towing list') {
+	$form['ajax']['management']['towings'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chptowings').
+		'/towings.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_towings'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'mobile list') {
+	$form['ajax']['management']['mobiles'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpmobile').
+		'/mobile.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_mobiles'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if (0 and $ss === 'patroller list') {
+	$form['ajax']['management']['patrollers'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chppatrol').
+		'/patrollers.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_patrollers'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+      if ($ss === 'scan list') {
+	$form['ajax']['management']['scans'] =
+	  array('#type' => 'image_button',
+		'#src' =>
+		drupal_get_path('module', 'anai_chpscans').
+		'/LPR.png',
+		'#attributes' => array('width' => $scale),
+		'#validate' => array('chpfront_form_validate_management_scans'),
+		'#submit' => array('chpfront_form_submit'));
+      }
+    }
+    $form['ajax']['management']['center_end'] = array('#value' => '</center>');
+  }
+
+  return $form;
+}
+
+function chpfront_form_validate_property_profiles($form, &$form_state) {
+  $form_state['storage']['property_profiles'] = TRUE;
+}
+
+function chpfront_form_validate_property_list($form, &$form_state) {
+  $form_state['storage']['property_list'] = TRUE;
+}
+
+function chpfront_form_validate_property_relations($form, &$form_state) {
+  $form_state['storage']['property_relations'] = TRUE;
+}
+
+function chpfront_form_validate_property_map($form, &$form_state) {
+  $form_state['storage']['property_map'] = TRUE;
+}
+
+function chpfront_form_validate_permit_rates($form, &$form_state) {
+  $form_state['storage']['permit_rates'] = TRUE;
+}
+
+function chpfront_form_validate_permit_add($form, &$form_state) {
+  $form_state['storage']['permit_add'] = TRUE;
+}
+
+function chpfront_form_validate_list($form, &$form_state) {
+  $form_state['storage']['permit_list'] = TRUE;
+}
+
+function chpfront_form_validate_permit_search($form, &$form_state) {
+  $form_state['storage']['permit_search'] = TRUE;
+}
+
+function chpfront_form_validate_permit_checkout($form, &$form_state) {
+  $form_state['storage']['permit_checkout'] = TRUE;
+}
+
+function chpfront_form_validate_valets($form, &$form_state) {
+  $form_state['storage']['valets'] = TRUE;
+}
+
+function chpfront_form_validate_accounts($form, &$form_state) {
+  $form_state['storage']['accounts'] = TRUE;
+}
+
+function chpfront_form_validate_validations($form, &$form_state) {
+  $form_state['storage']['validations'] = TRUE;
+}
+
+function chpfront_form_validate_analytics($form, &$form_state) {
+  $form_state['storage']['analytics'] = TRUE;
+}
+
+function chpfront_form_validate_equipment_lanes($form, &$form_state) {
+  $form_state['storage']['lanes'] = TRUE;
+}
+
+function chpfront_form_validate_equipment_devices($form, &$form_state) {
+  $form_state['storage']['devices'] = TRUE;
+}
+
+function chpfront_form_validate_equipment_occupancy($form, &$form_state) {
+  $form_state['storage']['occupancy'] = TRUE;
+}
+
+function chpfront_form_validate_equipment_hotlist($form, &$form_state) {
+  $form_state['storage']['hotlist'] = TRUE;
+}
+
+function chpfront_form_validate_management_admin($form, &$form_state) {
+  $form_state['storage']['management_admin'] = TRUE;
+}
+
+function chpfront_form_validate_management_reports($form, &$form_state) {
+  $form_state['storage']['management_reports'] = TRUE;
+}
+
+function chpfront_form_validate_management_alerts($form, &$form_state) {
+  $form_state['storage']['management_alerts'] = TRUE;
+}
+
+function chpfront_form_validate_management_complaints($form, &$form_state) {
+  $form_state['storage']['management_complaints'] = TRUE;
+}
+
+function chpfront_form_validate_management_tickets($form, &$form_state) {
+  $form_state['storage']['management_tickets'] = TRUE;
+}
+
+function chpfront_form_validate_management_boots($form, &$form_state) {
+  $form_state['storage']['management_boots'] = TRUE;
+}
+
+function chpfront_form_validate_management_towings($form, &$form_state) {
+  $form_state['storage']['management_towings'] = TRUE;
+}
+
+function chpfront_form_validate_management_mobiles($form, &$form_state) {
+  $form_state['storage']['management_mobiles'] = TRUE;
+}
+
+function chpfront_form_validate_management_patrollers($form, &$form_state) {
+  $form_state['storage']['management_patrollers'] = TRUE;
+}
+
+function chpfront_form_validate_management_scans($form, &$form_state) {
+  $form_state['storage']['management_scans'] = TRUE;
+}
+
+function chpfront_form_submit($form, &$form_state) {
+  if ($form_state['storage']['property_profiles']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppropprofiles';
+    return;
+  }
+  if ($form_state['storage']['property_list']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpproplist';
+    return;
+  }
+  if ($form_state['storage']['property_relations']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpproprel';
+    return;
+  }
+  if ($form_state['storage']['property_map']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppropmap';
+    return;
+  }
+  if ($form_state['storage']['permit_rates']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermtypes';
+    return;
+  }
+  if ($form_state['storage']['permit_add']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermadd';
+    return;
+  }
+  if ($form_state['storage']['permit_list']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermlist';
+    return;
+  }
+  if ($form_state['storage']['permit_search']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermsearch';
+    return;
+  }
+  if ($form_state['storage']['permit_checkout']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermcheckout';
+    return;
+  }
+  if ($form_state['storage']['valets']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpvaletlist';
+    return;
+  }
+  if ($form_state['storage']['accounts']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermgrp';
+    return;
+  }
+  if ($form_state['storage']['validations']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppermval';
+    return;
+  }
+  if ($form_state['storage']['analytics']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpanusage';
+    return;
+  }
+
+  if ($form_state['storage']['lanes']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chplane';
+    return;
+  }
+  if ($form_state['storage']['devices']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpdevice';
+    return;
+  }
+  if ($form_state['storage']['occupancy']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpoccu';
+    return;
+  }
+  if ($form_state['storage']['hotlist']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chphotlist';
+    return;
+  }
+
+  if ($form_state['storage']['management_admin']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpadmin';
+    return;
+  }
+  if ($form_state['storage']['management_reports']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpreportcreate';
+    return;
+  }
+  if ($form_state['storage']['management_alerts']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpalertlist';
+    return;
+  }
+  if ($form_state['storage']['management_complaints']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpcomplist';
+    return;
+  }
+  if ($form_state['storage']['management_tickets']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpticklist';
+    return;
+  }
+  if ($form_state['storage']['management_boots']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpbootslist';
+    return;
+  }
+  if ($form_state['storage']['management_towings']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chptowlist';
+    return;
+  }
+  if ($form_state['storage']['management_mobiles']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpmoblist';
+    return;
+  }
+  if ($form_state['storage']['management_patrollers']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+  if ($form_state['storage']['management_scans']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpscanlist';
+    return;
+  }
+}
+
+
+
+
+/**********
+ ********** Front Page for Anonymous users
+ ********** Address: chpanon
+ ********** Access:  'anai chp anonymous front page'
+ *********/
+
+
+
+function chpfront_anon_form($form_state) {
+  $link = '<img src="'.drupal_get_path('module', 'anai_chpfront').'/anon_image.jpg" border="0" alt="" width="95%">';
+  $form['image'] = array('#value' => $link);
+  return $form;
+}
+
+
+
+

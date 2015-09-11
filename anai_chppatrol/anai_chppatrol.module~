@@ -1,0 +1,952 @@
+<?php
+// $Id$
+require_once("anai_chppatrol.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * Patroller Management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chppatrol_perm() {
+  return array('anai chp add patrollers',
+	       'anai chp edit patrollers',
+	       'anai chp list patrollers',
+	       'anai chp delete patrollers',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chppatrol_theme($existing, $type, $theme, $path) {
+  return array
+    ('chppat_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chppatrol_menu() {
+  $items = array();
+  $items['chppatadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chppat_add_form'),
+     'access arguments' => array('anai chp add patrollers'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chppatlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chppat_list_form'),
+     'access arguments' => array('anai chp list patrollers'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Patrollers add
+ ********** Address: chppatadd
+ ********** Access:  'anai chp add patrollers'
+ *********/
+
+
+
+function chppat_add_form($form_state) {
+  drupal_set_title(t('Add '.strtolower(PATROLLER_NAME)));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+
+  // Layout patroller
+  if (!isset($form_state['storage']['property']['PatrollerId'])) {
+    $form_state['storage']['property']['PatrollerId'] = '';
+  }
+  $form['property']['PatrollerId'] =
+    array('#type' => 'textfield',
+	  '#title' => PATROLLER_NAME.t(' number'),
+	  '#maxlength' => 8,
+	  '#description' => t('Digits only'),
+	  '#default_value' => $form_state['storage']['property']['PatrollerId']);
+
+  // Layout password
+  if (!isset($form_state['storage']['property']['Password'])) {
+    $form_state['storage']['property']['Password'] = '';
+  }
+  $form['property']['Password'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Password'),
+	  '#maxlength' => 16,
+	  '#default_value' => $form_state['storage']['property']['Password']);
+
+  // Create session options
+  $options = array();
+  $options['60'] = t('One hour');
+  $options['120'] = t('Two hours');
+  $options['180'] = t('Three hours');
+  $options['240'] = t('Four hours');
+  $options['300'] = t('Five hours');
+  $options['360'] = t('Six hours');
+  $options['420'] = t('Seven hours');
+  $options['480'] = t('Eight hours');
+  $options['540'] = t('Nine hours');
+  $options['600'] = t('Ten hours');
+
+  // Layout session
+  if (!isset($form_state['storage']['property']['Session'])) {
+    $form_state['storage']['property']['Session'] = '480';
+  }
+  $form['property']['Session'] =
+    array('#type' => 'select',
+	  '#title' => t('Session timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Session']);
+
+  // Create idle options
+  $options = array();
+  $options['15'] = t('15 minutes');
+  $options['30'] = t('30 minutes');
+  $options['45'] = t('45 minutes');
+  $options['60'] = t('One hour');
+  $options['90'] = t('One hour and 30 minutes');
+  $options['120'] = t('Two hours');
+  $options['150'] = t('Two hours and 30 minutes');
+  $options['180'] = t('Three hours');
+
+  // Layout idle
+  if (!isset($form_state['storage']['property']['Idle'])) {
+    $form_state['storage']['property']['Idle'] = '120';
+  }
+  $form['property']['Idle'] =
+    array('#type' => 'select',
+	  '#title' => t('Idle timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Idle']);
+
+  // Create permission options
+  $options = array();
+  $options['Tickets'] = t('Tickets');
+  $options['Boots'] = t('Boots');
+  $options['Whitelist'] = t('Whitelist');
+  $options['Hotlist'] = t('Hotlist');
+  $options['Valet'] = t('Valet');
+  $default = array();
+  foreach ($options as $k => $v) {
+    $default[$k] = $k;
+  }
+
+  // Layout permissions options
+  $form['property']['config'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Permissions'));
+  if (!isset($form_state['storage']['property']['config']['Permissions'])) {
+    $form_state['storage']['property']['config']['Permissions'] = $default;
+  }
+  $form['property']['config']['Permissions'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['config']['Permissions']);
+
+  // Create property options
+  $properties = array();
+  foreach ($form_state['storage']['property']['Properties'] as $property_id => $property) {
+    $properties[$property_id] =
+      $property['data']['Alias'].', '.
+      $property['data']['Street1'].', '.
+      $property['data']['City'];
+  }
+
+  // Layout property options
+  $form['property']['property'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Assign to properties'));
+  if (!isset($form_state['storage']['property']['property']['PropertyId'])) {
+    $form_state['storage']['property']['property']['PropertyId'] = array();
+  }
+  $form['property']['property']['PropertyId'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $properties,
+	  '#default_value' => $form_state['storage']['property']['property']['PropertyId']);
+
+  // Layout agent name
+  if (!isset($form_state['storage']['property']['AgentName'])) {
+    $form_state['storage']['property']['AgentName'] = '';
+  }
+  $form['property']['AgentName'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User name'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentName']);
+
+  // Layout agent address
+  if (!isset($form_state['storage']['property']['AgentAddress'])) {
+    $form_state['storage']['property']['AgentAddress'] = '';
+  }
+  $form['property']['AgentAddress'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User address'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentAddress']);
+
+  // Layout agent contact
+  if (!isset($form_state['storage']['property']['AgentContact'])) {
+    $form_state['storage']['property']['AgentContact'] = '';
+  }
+  $form['property']['AgentContact'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User contact information'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentContact']);
+
+  // Layout comment
+  if (!isset($form_state['storage']['property']['Comment'])) {
+    $form_state['storage']['property']['Comment'] = '';
+  }
+  $form['property']['Comment'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Comment'),
+	  '#maxlength' => 512,
+	  '#default_value' => $form_state['storage']['property']['Comment']);
+
+  $form['property']['save'] =
+    array('#type' => 'submit',
+	  '#value' => t('Save'),
+	  '#validate' => array('chppat_add_form_validate_save'),
+	  '#submit' => array('chppat_add_form_submit'));
+
+  $form['property']['cancel'] =
+    array('#type' => 'submit',
+	  '#value' => t('Cancel'),
+	  '#validate' => array('chppat_add_form_validate_cancel'),
+	  '#submit' => array('chppat_add_form_submit'));
+  return $form;
+}
+
+function chppat_add_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['property']['PatrollerId'])) {
+    form_set_error('property][PatrollerId',
+		   PATROLLER_NAME.t(' number field is required.'));
+    return;
+  }
+  if (!preg_match('/^\d+$/', $form_state['values']['property']['PatrollerId'])) {
+    form_set_error('property][PatrollerId',
+		   PATROLLER_NAME.t(' number must be a numeric value.'));
+    return;
+  }
+  if (empty($form_state['values']['property']['Password'])) {
+    form_set_error('property][Password', t('Password field is required.'));
+    return;
+  }
+  if (strpos($form_state['values']['property']['Password'], '<') !== FALSE or
+      strpos($form_state['values']['property']['Password'], ';') !== FALSE or
+      strpos($form_state['values']['property']['Password'], '>') !== FALSE) {
+    form_set_error('property][Password',
+		   t('Sorry, password can\'t include < or > or ; characters.'));
+    return;
+  }
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chppat_add_form_validate_cancel($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chppat_add_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    $company_id = $form_state['storage']['property']['CompanyId'];
+    $property_id = $form_state['storage']['property']['PropertyId'];
+    $lot_id = $form_state['storage']['property']['LotId'];
+    global $user;
+
+    if (chdbpatrol_insert_new_patroller
+	($user->name,
+	 $company_id,
+	 $form_state['values']['property']['PatrollerId'],
+	 check_plain($form_state['values']['property']['Password']),
+	 check_plain($form_state['values']['property']['Comment']),
+	 $form_state['values']['property']['Session'],
+	 $form_state['values']['property']['Idle'],
+	 $form_state['values']['property']['config']['Permissions']['Tickets'],
+	 $form_state['values']['property']['config']['Permissions']['Boots'],
+	 $form_state['values']['property']['config']['Permissions']['Whitelist'],
+	 $form_state['values']['property']['config']['Permissions']['Hotlist'],
+	 $form_state['values']['property']['config']['Permissions']['Valet'],
+	 $id)) {
+      drupal_set_message('Could not insert new', 'error');
+      return;
+    }
+
+    if (chdbpatrol_update_patroller_contact
+	($id,
+	 check_plain($form_state['values']['property']['AgentName']),
+	 check_plain($form_state['values']['property']['AgentAddress']),
+	 check_plain($form_state['values']['property']['AgentContact']))) {
+      drupal_set_message('Could not insert contact', 'error');
+      return;
+    }
+
+    if (chdbpatrol_delete_patroller_property
+	($company_id,
+	 $form_state['values']['property']['PatrollerId'])) {
+      drupal_set_message('Could not prepare', 'error');
+      return;
+    }
+
+    foreach ($form_state['values']['property']['property']['PropertyId'] as $pid => $value) {
+      if (!$value) {
+	continue;
+      }
+      if (chdbpatrol_insert_patroller_property
+	  ($form_state['values']['property']['PatrollerId'],
+	   $pid,
+	   $company_id,
+	   $tmp)) {
+	drupal_set_message('Could not insert', 'error');
+	return;
+      }
+    }
+
+    if (chdbpatrol_insert_patroller_poll
+	($company_id,
+	 $form_state['values']['property']['PatrollerId'])) {
+      drupal_set_message('Could not insert poll', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Patrollers list
+ ********** Address: chppatlist
+ ********** Access:  'anai chp list patrollers'
+ *********/
+
+
+
+function chppat_list_form($form_state) {
+  if ($form_state['storage']['patroller_edit']) {
+    return chppat_list_edit_form($form_state);
+  }
+
+  drupal_set_title(PATROLLER_NAME.'s');
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['validate'] = 'chppat_list_form_validate_back';
+  $settings['buttons']['back']['submit'] = 'chppat_list_form_submit';
+  if (user_access('anai chp add patrollers')) {
+    $settings['buttons']['add']['title'] = t('Add');
+    $settings['buttons']['add']['validate'] = 'chppat_list_form_validate_add';
+    $settings['buttons']['add']['submit'] = 'chppat_list_form_submit';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+
+  $entries = array();
+  foreach (chdbpatrol_get_property_patrollers($company_id, $property_id) as $patroller) {
+    $company_id = $patroller['CompanyId'];
+    $patroller_id = $patroller['PatrollerId'];
+    $patroller = chdbpatrol_get_patroller($company_id, $patroller_id);
+    if (sizeof($patroller) == 0) {
+      continue;
+    }
+    $entries[$patroller_id] = $patroller;
+  }
+  $form['property']['filter'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Assigned to property'));
+  if (sizeof($entries) == 0) {
+    $form['property']['filter']['empty'] = array('#value' => '<p>'.t('Empty.').'<p>');
+  } else {
+    $form['property']['filter']['list'] = chppat_list_table_form($entries);
+  }
+
+  $entries = chdbpatrol_get_patrollers($company_id);
+  $form['property']['all'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Available'));
+  if (sizeof($entries) == 0) {
+    $form['property']['all']['empty'] = array('#value' => '<p>'.t('Empty.').'<p>');
+  } else {
+    $form['property']['all']['list'] = chppat_list_table_form($entries);
+  }
+
+  return $form;
+}
+
+function chppat_list_form_validate_add($form, &$form_state) {
+  $form_state['storage']['add'] = TRUE;
+}
+
+function chppat_list_form_validate_back($form, &$form_state) {
+  $form_state['storage']['home'] = TRUE;
+}
+
+function chppat_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chppat_list_table');
+
+  if (user_access('anai chp edit patrollers')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $entry) {
+    if ($entry['Suspended']) {
+      $form['db']['patid_'.$looper] =
+	array('#value' => '<del>'.$entry['PatrollerId'].'</del>');
+    } else {
+      $form['db']['patid_'.$looper] =
+	array('#value' => $entry['PatrollerId']);
+    }
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    $form['db']['comment_'.$looper] =
+      array('#value' => decode_entities($entry['Comment']));
+
+    $form['db']['ticket_'.$looper] =
+      array('#value' => $entry['Tickets'] ? t('Yes') : t('No'));
+
+    $form['db']['boots_'.$looper] =
+      array('#value' => $entry['Boots'] ? t('Yes') : t('No'));
+
+    $form['db']['whitelist_'.$looper] =
+      array('#value' => $entry['Whitelist'] ? t('Yes') : t('No'));
+
+    $form['db']['hotlist_'.$looper] =
+      array('#value' => $entry['Hotlist'] ? t('Yes') : t('No'));
+
+    $form['db']['valet_'.$looper] =
+      array('#value' => $entry['Valet'] ? t('Yes') : t('No'));
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'submit',
+	      '#value' => t('Edit'),
+	      '#name' => 'op_edit'.$entry['Id'],
+	      '#submit' => array('chppat_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chppat_list_table($form) {
+  // Table Header
+  $header = array('Id', 'Created', 'Comment',
+		  'Tickets', 'Boots', 'Whitelist', 'Hotlist', 'Valet',
+		  '');
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'patid_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('patid_'));
+    $rows[] = array(drupal_render($form['patid_'.$looper]),
+                    drupal_render($form['time_'.$looper]),
+                    drupal_render($form['comment_'.$looper]),
+                    drupal_render($form['ticket_'.$looper]),
+                    drupal_render($form['boots_'.$looper]),
+                    drupal_render($form['whitelist_'.$looper]),
+                    drupal_render($form['hotlist_'.$looper]),
+                    drupal_render($form['valet_'.$looper]),
+                    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chppat_list_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form
+      ($form, 'Are you sure?', 'chppatlist',
+       'The '.strtolower(PATROLLER_NAME).' will be deleted permanently from the system.');
+  }
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $patroller = chdbpatrol_get_patroller_id($id);
+  $patroller_id = $patroller['PatrollerId'];
+  drupal_set_title(t('Edit '.strtolower(PATROLLER_NAME).' - '.$patroller_id));
+
+  $settings = array();
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+
+  // Layout suspended option
+  if (!isset($form_state['storage']['property']['Suspended'])) {
+    $form_state['storage']['property']['Suspended'] = $patroller['Suspended'];
+  }
+  $form['property']['Suspended_Org'] =
+    array('#type' => 'hidden',
+	  '#value' => $patroller['Suspended']);
+  $form['property']['Suspended'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('Temporary suspended'),
+	  '#default_value' => $form_state['storage']['property']['Suspended'],
+	  '#description' =>
+	  t('The '.strtolower(PATROLLER_NAME).
+	    ' will not be able to login while suspended'));
+
+  // Layout password
+  if (!isset($form_state['storage']['property']['Password'])) {
+    $form_state['storage']['property']['Password'] =
+      decode_entities($patroller['Password']);
+  }
+  $form['property']['Password'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Password'),
+	  '#maxlength' => 16,
+	  '#default_value' => $form_state['storage']['property']['Password']);
+
+  // Create session options
+  $options = array();
+  $options['60'] = t('One hour');
+  $options['120'] = t('Two hours');
+  $options['180'] = t('Three hours');
+  $options['240'] = t('Four hours');
+  $options['300'] = t('Five hours');
+  $options['360'] = t('Six hours');
+  $options['420'] = t('Seven hours');
+  $options['480'] = t('Eight hours');
+  $options['540'] = t('Nine hours');
+  $options['600'] = t('Ten hours');
+
+  // Layout session
+  if (!isset($form_state['storage']['property']['Session'])) {
+    $form_state['storage']['property']['Session'] =
+      $patroller['SessionMinutes'];
+  }
+  $form['property']['Session'] =
+    array('#type' => 'select',
+	  '#title' => t('Session timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Session']);
+
+  // Create idle options
+  $options = array();
+  $options['15'] = t('15 minutes');
+  $options['30'] = t('30 minutes');
+  $options['45'] = t('45 minutes');
+  $options['60'] = t('One hour');
+  $options['90'] = t('One hour and 30 minutes');
+  $options['120'] = t('Two hours');
+  $options['150'] = t('Two hours and 30 minutes');
+  $options['180'] = t('Three hours');
+
+  // Layout idle
+  if (!isset($form_state['storage']['property']['Idle'])) {
+    $form_state['storage']['property']['Idle'] =
+      $patroller['IdleMinutes'];
+  }
+  $form['property']['Idle'] =
+    array('#type' => 'select',
+	  '#title' => t('Idle timeout'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Idle']);
+
+  // Create permission options
+  $options = array();
+  $options['Tickets'] = t('Tickets');
+  if ($patroller['Tickets']) {
+    $default[] = 'Tickets';
+  }
+  $options['Boots'] = t('Boots');
+  if ($patroller['Boots']) {
+    $default[] = 'Boots';
+  }
+  $options['Whitelist'] = t('Whitelist');
+  if ($patroller['Whitelist']) {
+    $default[] = 'Whitelist';
+  }
+  $options['Hotlist'] = t('Hotlist');
+  if ($patroller['Hotlist']) {
+    $default[] = 'Hotlist';
+  }
+  $options['Valet'] = t('Valet');
+  if ($patroller['Valet']) {
+    $default[] = 'Valet';
+  }
+
+  // Layout permissions options
+  $form['property']['config'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Permissions'));
+  if (!isset($form_state['storage']['property']['config']['Permissions'])) {
+    $form_state['storage']['property']['config']['Permissions'] = $default;
+  }
+  $form['property']['config']['Permissions'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['config']['Permissions']);
+
+  // Create property options
+  $properties = array();
+  foreach ($form_state['storage']['property']['Properties'] as $property_id => $property) {
+    $properties[$property_id] =
+      $property['data']['Alias'].', '.
+      $property['data']['Street1'].', '.
+      $property['data']['City'];
+  }
+  $default = array();
+  foreach (chdbpatrol_get_patroller_properties($company_id, $patroller_id) as $property) {
+    $default[] = $property['PropertyId'];
+  }
+
+  // Layout property options
+  $form['property']['property'] =
+    array('#type' => 'fieldset',
+	  '#title' => t('Assign to properties'));
+  if (!isset($form_state['storage']['property']['property']['PropertyId'])) {
+    $form_state['storage']['property']['property']['PropertyId'] = $default;
+  }
+  $form['property']['property']['PropertyId'] =
+    array('#type' => 'checkboxes',
+	  '#options' => $properties,
+	  '#default_value' => $form_state['storage']['property']['property']['PropertyId']);
+
+  // Layout agent name
+  if (!isset($form_state['storage']['property']['AgentName'])) {
+    $form_state['storage']['property']['AgentName'] =
+      decode_entities($patroller['Name']);
+  }
+  $form['property']['AgentName'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User name'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentName']);
+
+  // Layout agent address
+  if (!isset($form_state['storage']['property']['AgentAddress'])) {
+    $form_state['storage']['property']['AgentAddress'] =
+      decode_entities($patroller['Address']);
+  }
+  $form['property']['AgentAddress'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User address'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentAddress']);
+
+  // Layout agent contact
+  if (!isset($form_state['storage']['property']['AgentContact'])) {
+    $form_state['storage']['property']['AgentContact'] =
+      decode_entities($patroller['ContactInfo']);
+  }
+  $form['property']['AgentContact'] =
+    array('#type' => 'textfield',
+	  '#title' => t('User contact information'),
+	  '#maxlength' => 50,
+	  '#description' => t('(Optional)'),
+	  '#default_value' => $form_state['storage']['property']['AgentContact']);
+
+  // Layout comment
+  if (!isset($form_state['storage']['property']['Comment'])) {
+    $form_state['storage']['property']['Comment'] =
+      decode_entities($patroller['Comment']);
+  }
+  $form['property']['Comment'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Comment'),
+	  '#maxlength' => 512,
+	  '#default_value' => $form_state['storage']['property']['Comment']);
+
+  $form['property']['save'] =
+    array('#type' => 'submit',
+	  '#value' => t('Save'),
+	  '#validate' => array('chppat_list_edit_form_validate_save'),
+	  '#submit' => array('chppat_list_form_submit'));
+
+  $form['property']['cancel'] =
+    array('#type' => 'submit',
+	  '#value' => t('Cancel'),
+	  '#validate' => array('chppat_list_edit_form_validate_cancel'),
+	  '#submit' => array('chppat_list_form_submit'));
+
+  if (user_access('anai chp delete patrollers')) {
+    $form['property']['delete'] =
+      array('#type' => 'submit',
+	    '#value' => t('Delete '.strtolower(PATROLLER_NAME)),
+	    '#validate' => array('chppat_list_edit_form_validate_delete'),
+	    '#submit' => array('chppat_list_form_submit'));
+  }
+  return $form;
+}
+
+function chppat_list_edit_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['property']['Password'])) {
+    form_set_error('property][Password', t('Password field is required.'));
+    return;
+  }
+  if (strpos($form_state['values']['property']['Password'], '<') !== FALSE or
+      strpos($form_state['values']['property']['Password'], ';') !== FALSE or
+      strpos($form_state['values']['property']['Password'], '>') !== FALSE) {
+    form_set_error('property][Password',
+		   t('Sorry, password can\'t include < or > or ; characters.'));
+    return;
+  }
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chppat_list_edit_form_validate_cancel($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chppat_list_edit_form_validate_delete($form, &$form_state) {
+  $form_state['storage']['delete'] = TRUE;
+}
+
+function chppat_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+  if ($form_state['storage']['add']) {
+    $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+    $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+    $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatadd';
+    return;
+  }
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    $patroller = chdbpatrol_get_patroller_id($id);
+
+    if (chdbpatrol_insert_patroller_poll
+	($patroller['PatrollerId'],
+	 $patroller['CompanyId'])) {
+      drupal_set_message('Could not insert poll', 'error');
+      return;
+    }
+
+    if (chdbpatrol_delete_patroller_id($id)) {
+      drupal_set_message('Could not delete', 'error');
+      return;
+    }
+    if (chdbpatrol_delete_patroller_property
+	($patroller['CompanyId'],
+	 $patroller['PatrollerId'])) {
+      drupal_set_message('Could not delete from property', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+  if ($form_state['storage']['delete']) {
+    unset($form_state['storage']['delete']);
+    $form_state['storage']['confirm_delete'] = TRUE;
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+    $patroller = chdbpatrol_get_patroller_id($id);
+
+    if (chdbpatrol_update_patroller
+	($id,
+	 check_plain($form_state['values']['property']['Password']),
+	 check_plain($form_state['values']['property']['Comment']),
+	 $form_state['values']['property']['Session'],
+	 $form_state['values']['property']['Idle'],
+	 $form_state['values']['property']['config']['Permissions']['Tickets'],
+	 $form_state['values']['property']['config']['Permissions']['Boots'],
+	 $form_state['values']['property']['config']['Permissions']['Whitelist'],
+	 $form_state['values']['property']['config']['Permissions']['Hotlist'],
+	 $form_state['values']['property']['config']['Permissions']['Valet'])) {
+	drupal_set_message('Could not update', 'error');
+	return;
+    }
+
+    if ($form_state['values']['property']['Suspended'] !=
+	$form_state['values']['property']['Suspended_Org']) {
+      if (chdbpatrol_suspend_patroller
+	  ($id, $form_state['values']['property']['Suspended'])) {
+	drupal_set_message('Could not save changes', 'error');
+	return;
+      }
+    }
+
+    if (chdbpatrol_update_patroller_contact
+	($id,
+	 check_plain($form_state['values']['property']['AgentName']),
+	 check_plain($form_state['values']['property']['AgentAddress']),
+	 check_plain($form_state['values']['property']['AgentContact']))) {
+      drupal_set_message('Could not update contact', 'error');
+      return;
+    }
+
+    if (chdbpatrol_delete_patroller_property
+	($patroller['CompanyId'],
+	 $patroller['PatrollerId'])) {
+      drupal_set_message('Could not prepare to property', 'error');
+      return;
+    }
+
+    foreach ($form_state['values']['property']['property']['PropertyId']
+	     as $property_id => $value) {
+      if (!$value) {
+    	continue;
+      }
+      if (chdbpatrol_insert_patroller_property
+    	  ($patroller['PatrollerId'],
+    	   $property_id,
+    	   $patroller['CompanyId'],
+    	   $tmp)) {
+    	drupal_set_message('Could not insert to property', 'error');
+    	return;
+      }
+    }
+
+    if (chdbpatrol_insert_patroller_poll
+	($patroller['PatrollerId'],
+	 $patroller['CompanyId'])) {
+      drupal_set_message('Could not insert poll', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chppatlist';
+    return;
+  }
+
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['patroller_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+

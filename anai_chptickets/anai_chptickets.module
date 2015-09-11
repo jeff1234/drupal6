@@ -1,0 +1,1062 @@
+<?php
+// $Id$
+require_once("anai_chptickets.inc");
+require_once("anai_chptickets_search.inc");
+require_once("anai_chptickets_printer.inc");
+require_once("anai_chptickets_violations.inc");
+define('TICKET_RETENTION_DAYS', 30);
+
+
+
+/**
+ * @file
+ * ANAI CHP Tickets
+ *
+ * Ticket management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+function anai_chptickets_cron() {
+  $skip_delete = FALSE;
+  $datetime1 = chpuser_datetime_utc_to_utc('now');
+
+  if (chdbtick_update_tickets_to_retention_when_paid()) {
+    watchdog('anai_chptick',
+	     'update_tickets_to_retention_when_paid failed');
+  }
+
+  if (chdbtick_retire_tickets_retention_older_than
+      ($datetime1->format("Y-m-d H:i:s"), TICKET_RETENTION_DAYS)) {
+    watchdog('anai_chptick',
+  	     'retire_tickets_retention_older_than '.
+  	     $datetime1->format("Y-m-d H:i:s").' failed');
+    $skip_delete = TRUE;
+  }
+
+  if (!$skip_delete) {
+    if (chdbtick_delete_tickets_retention_older_than
+  	($datetime1->format("Y-m-d H:i:s"), TICKET_RETENTION_DAYS)) {
+      watchdog('anai_chptick',
+  	       'delete_tickets_retention_older_than '.
+  	       $datetime1->format("Y-m-d H:i:s").' failed');
+    }
+  }
+}
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chptickets_perm() {
+  return array('anai chp add tickets',
+	       'anai chp copy manual tickets',
+	       'anai chp edit tickets',
+	       'anai chp list tickets',
+	       'anai chp delete tickets',
+	       'anai chp export tickets',
+	       'anai chp config printer',
+	       'anai chp add ticket violations',
+	       'anai chp edit ticket violations',
+	       'anai chp list ticket violations',
+	       'anai chp delete ticket violations');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chptickets_theme($existing, $type, $theme, $path) {
+  return array
+    ('chptick_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chptick_violations_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chptick_search_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chptickets_menu() {
+  $items = array();
+  $items['chptickadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptick_add_form'),
+     'access arguments' => array('anai chp add tickets'),
+     'type' => MENU_CALLBACK,
+     );
+  /* $items['chptickcopy'] = array */
+  /*   ('page callback' => 'drupal_get_form', */
+  /*    'page arguments' => array('chptick_copy_form'), */
+  /*    'access arguments' => array('anai chp copy manual tickets'), */
+  /*    'type' => MENU_CALLBACK, */
+  /*    ); */
+  $items['chptickpdf/%/%/%'] = array
+    ('page callback' => 'chptick_pdf_form',
+     'page arguments' => array(1,2,3),
+     'access arguments' => array('anai chp list tickets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpticklist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptick_list_form'),
+     'access arguments' => array('anai chp list tickets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptickexp/%/%/%/%'] = array
+    ('page callback' => 'chptick_export_form',
+     'page arguments' => array(1,2,3,4),
+     'access arguments' => array('anai chp export tickets'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptickvioadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptick_violations_add_form'),
+     'access arguments' => array('anai chp add ticket violations'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptickviolist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptick_violations_form'),
+     'access arguments' => array('anai chp list ticket violations'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chptickprn'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chptick_printer_form'),
+     'access arguments' => array('anai chp config printer'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Ticket add
+ ********** Address: chptickadd
+ ********** Access:  'anai chp add tickets'
+ *********/
+
+
+
+function chptick_add_form($form_state) {
+  if (isset($form_state['storage']['confirm'])) {
+    return confirm_form($form, 'Are you sure?', 'chpticklist',
+			t('Vehicle LPN already got a ticket in last 24 hours.',
+			  array('LPN' => $form_state['storage']['LPN'])));
+  }
+
+  drupal_set_title(t('Add ticket'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+  $enforcement_id = $policy['data']['EnforcementId'];
+
+  if (empty($enforcement_id)) {
+    $form['ajax']['error'] = array('#value' => '<p>'.t('The lot is not enforced.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chptick_add_form_submit_cancel'));
+    return $form;
+  }
+
+  // Create enforcer options
+  $options = array();
+  foreach (chpprop_retrieve_enforcers($user->uid, $company_id, $property_id, $lot_id)
+	   as $enforcer_id => $enforcer) {
+    $options[$enforcer_id] =
+      decode_entities($enforcer['data']['Alias']).', '.
+      decode_entities($enforcer['data']['Street']).', '.
+      decode_entities($enforcer['data']['City']);
+  }
+
+  if (empty($options)) {
+    $form['ajax']['error'] =
+      array('#value' => t('Enforcers yet to be configured on lot, impossible to continue.'));
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chptick_add_form_submit_cancel'));
+    return $form;
+  }
+
+  // Layout enforcer options
+  if (!isset($form_state['storage']['ajax']['EnforcerId'])) {
+    $form_state['storage']['ajax']['EnforcerId'] = key($options);
+  }
+  $form['ajax']['EnforcerId'] =
+    array('#type' => 'select',
+	  '#title' => t('Enforcer'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['EnforcerId'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ((in_array('Admin', array_values($account->roles)) and $account->status) or
+      $account->uid == 1) {
+    $options = array();
+    foreach (chdbprop_get_enforceradmins($company_id,
+					 $form_state['storage']['ajax']['EnforcerId']) as $admin) {
+      $options[$admin['AdminId']] =
+	decode_entities($admin['FirstName']).' '.
+	decode_entities($admin['LastName']);
+    }
+
+    if (!isset($form_state['storage']['ajax']['AdminId'])) {
+      $form_state['storage']['ajax']['AdminId'] = key($options);
+    }
+    $form['ajax']['AdminId'] =
+      array('#type' => 'select',
+	    '#title' => t('Contact or administrator'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['AdminId']);
+  } else {
+    $enforcer_user = chdbprop_get_enforcer_user($company_id,
+						$form_state['storage']['ajax']['EnforcerId'],
+						$user->uid);
+
+    if (empty($enforcer_user) or (!empty($enforcer_user) and empty($enforcer_user['AdminId']))) {
+      $form['ajax']['error'] =
+	array('#value' => t('Your login is not associated with the enforcer, impossible to continue.'));
+      $form['ajax']['cancel'] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	      '#submit' => array('chptick_add_form_submit_cancel'));
+      return $form;
+    }
+
+    if (!isset($form_state['storage']['ajax']['AdminId'])) {
+      $form_state['storage']['ajax']['AdminId'] = $enforcer_user['AdminId'];
+    }
+    $form['ajax']['AdminId'] =
+      array('#type' => 'hidden',
+	    '#value' => $form_state['storage']['ajax']['AdminId']);
+  }
+
+  // Create violation options
+  $ticketcodes = array();
+  foreach (chdbprop_get_ticketcodes
+	   ($company_id, $form_state['storage']['ajax']['EnforcerId'],
+	    FALSE, // Template
+	    $property_id, $lot_id) as $ticketcode) {
+    if (!isset($ticketcode[$ticketcode['Code']])) {
+      $ticketcodes[$ticketcode['Code']] = $ticketcode;
+    }
+  }
+  foreach (chdbprop_get_ticketcodes
+	   ($company_id, $form_state['storage']['ajax']['EnforcerId'],
+	    TRUE, // Template
+	    NULL, NULL) as $ticketcode) {
+    if (!isset($ticketcode[$ticketcode['Code']])) {
+      $ticketcodes[$ticketcode['Code']] = $ticketcode;
+    }
+  }
+
+  if (empty($ticketcodes)) {
+    $form['ajax']['error'] =
+      array('#value' => '<p>'.t('Violation codes yet to be configured for lot, impossible to continue.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chptick_add_form_submit_cancel'));
+    return $form;
+  }
+
+  // Check printer
+  $printer = chdbprop_get_ticketprinter
+    ($company_id, $form_state['storage']['ajax']['EnforcerId'],
+     FALSE, // Template
+     $property_id, $lot_id);
+  if (empty($printer)) {
+    $printer = chdbprop_get_ticketprinter
+      ($company_id, $form_state['storage']['ajax']['EnforcerId'],
+       TRUE, // Template
+       NULL, NULL);
+  }
+
+  if (empty($printer)) {
+    $form['ajax']['error'] =
+      array('#value' => '<p>'.t('Printer yet to be configured for lot, impossible to continue.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chptick_add_form_submit_cancel'));
+    return $form;
+  }
+
+  // Create violations with both code and amount part of key
+  ksort($ticketcodes);
+  $select = array();
+  foreach ($ticketcodes as $ticketcode) {
+    $select[$ticketcode['Code'].'___'.$ticketcode['Amount']] =
+      decode_entities($ticketcode['Description']).' ('.$ticketcode['Amount'].')';
+  }
+
+  // Layout violations
+  if (!isset($form_state['storage']['ajax']['Violation'])) {
+    $form_state['storage']['ajax']['Violation'] = 'Other___0.00';
+  }
+  $select['Other___0.00'] = 'Other';
+  $form['ajax']['Violation'] =
+    array('#type' => 'select', '#title' => t('Violation'),
+	  '#options' => $select,
+	  '#default_value' => $form_state['storage']['ajax']['Violation'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  // Layout amount
+  if (!isset($form_state['storage']['ajax']['Amount'])) {
+    $form_state['storage']['ajax']['Amount'] = '0.00';
+  } else {
+    $form_state['storage']['ajax']['Amount'] =
+      substr($form_state['storage']['ajax']['Violation'],
+	     strpos($form_state['storage']['ajax']['Violation'], "___") + 3);
+  }
+  $form['ajax']['Amount'] =
+    array('#type' => 'textfield',
+	  '#title' => t('Amount'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['ajax']['Amount'],
+	  '#description' => 'Format: X.XX');
+
+  // Layout manual option
+  $options = array();
+  $options['Regular'] = t('Regular ticket');
+  $options['Manual'] = t('Add manually issued ticket');
+  if (!isset($form_state['storage']['ajax']['Type'])) {
+    $form_state['storage']['ajax']['Type'] = key($options);
+  }
+  $form['ajax']['Type'] =
+    array('#type' => 'select',
+	  '#title' => t('Registration'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Type'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ($form_state['storage']['ajax']['Type'] === 'Manual') {
+    if (!isset($form_state['storage']['ajax']['TicketId'])) {
+      $form_state['storage']['ajax']['TicketId'] = '';
+    }
+    $form['ajax']['TicketId'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Ticket nummer'),
+	    '#maxlength' => 20,
+	    '#default_value' => $form_state['storage']['ajax']['TicketId'],
+	    '#description' => t('Ticket nummer used on manually issued ticket'));
+    
+    drupal_add_js
+      ('(function ($) {
+          Drupal.behaviors.ANAIchpticketAdd=function(context){
+      	    $("#edit-ajax-ManualTime:not(.CheckoutTime-processed)",context)
+              .addClass("ManualTime-processed")
+              .AnyTime_picker({format:"%Y-%m-%d %H:%i:%s",hideInput:true,
+                              labelTitle:"Issued Date and Time",
+                              placement:"inline",askSecond:false});
+          };
+       }(jQuery));', 'inline');
+    $form['ajax']['ManualTime'] = array('#type' => 'textfield');
+  }
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  if (chpprop_produce_vehicle($form, $form_state, $settings)) {
+    return $form;
+  }
+
+  // Layout comment
+  if (!isset($form_state['storage']['ajax']['Comment'])) {
+    $form_state['storage']['ajax']['Comment'] = '';
+  }
+  $form['ajax']['Comment'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Comment'),
+	  '#maxlength' => 300,
+	  '#default_value' => $form_state['storage']['ajax']['Comment']);
+
+  // Layout buttons
+  $form['ajax']['submit'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chptick_add_form_validate_save'),
+	  '#submit' => array('chptick_add_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chptick_add_form_submit_cancel'));
+
+  return $form;
+}
+
+function chptick_add_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpticklist';
+}
+
+function chptick_add_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['ajax']['Amount'])) {
+    form_set_error('ajax][Amount', 'Amount field is required.');
+    return;
+  }
+  if (!preg_match('/\d+\.\d{2}/', $form_state['values']['ajax']['Amount'])) {
+    form_set_error('ajax][Amount', 'Amount must be given in format X.XX');
+    return;
+  }
+  if (empty($form_state['values']['ajax']['LPN'])) {
+    form_set_error('ajax][LPN', 'License plate number field is required.');
+    return;
+  }
+  if (preg_match('/\s/', $form_state['values']['ajax']['LPN'])) {
+    form_set_error('ajax][LPN',
+		   'License plate number shall be given without any spaces');
+    return;
+  }
+  if (strlen($form_state['values']['ajax']['Model']) == 0) {
+    form_set_error('ajax][Model', 'Model field is required.');
+    return;
+  }
+  if (strlen($form_state['values']['ajax']['Color']) == 0) {
+    form_set_error('ajax][Color', 'Color field is required.');
+    return;
+  }
+
+  $company_id = $form_state['values']['ajax']['CompanyId'];
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+  $lot_id = $form_state['values']['ajax']['LotId'];
+  $enforcer_id = $form_state['values']['ajax']['EnforcerId'];
+  $lpn = strtoupper($form_state['values']['ajax']['LPN']);
+
+  $time = chpuser_datetime_utc_to_utc('now');
+  $time->modify('-1 day');
+
+  $entries = chdbtick_get_tickets_lpn
+    ($company_id, $enforcer_id, $lpn,
+     $time->format("Y-m-d H:i:s"),
+     TRUE, TRUE);
+  if (!empty($entries)) {
+    form_set_error('ajax][LPN', 'License plate already ticketed last 24 hours');
+    return;
+  }
+}
+
+function chptick_add_form_submit_save($form, &$form_state) {
+  $company_id = $form_state['values']['ajax']['CompanyId'];
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+  $lot_id = $form_state['values']['ajax']['LotId'];
+  $enforcer_id = $form_state['values']['ajax']['EnforcerId'];
+  $enforcer = chdbprop_get_enforcer($company_id, $enforcer_id);
+  $admin_id = $form_state['values']['ajax']['AdminId'];
+  $lpn = strtoupper($form_state['values']['ajax']['LPN']);
+  $make = $form_state['values']['ajax']['Make'];
+  $model = decode_entities($form_state['values']['ajax']['Model']);
+  $color = decode_entities($form_state['values']['ajax']['Color']);
+  $code = substr($form_state['values']['ajax']['Violation'], 0,
+		 strpos($form_state['values']['ajax']['Violation'], '___'));
+
+  $ticketcode = chdbprop_get_ticketcode
+    ($company_id, $enforcer_id,
+     FALSE,
+     $code,
+     $property_id, $lot_id);
+  if (empty($ticketcode)) {
+    $ticketcode = chdbprop_get_ticketcode
+      ($company_id, $enforcer_id,
+       TRUE,
+       $code,
+       NULL, NULL);
+  }
+
+  $description = decode_entities($ticketcode['Description']);
+  $amount = $form_state['values']['ajax']['Amount'];
+
+  $printer = chdbprop_get_ticketprinter
+    ($company_id, $enforcer_id,
+     FALSE, // Template
+     $property_id, $lot_id);
+  if (empty($printer)) {
+    $printer = chdbprop_get_ticketprinter
+      ($company_id, $enforcer_id,
+       TRUE, // Template
+       NULL, NULL);
+  }
+
+  $addr1 = decode_entities($printer['Addr1']);
+  $addr2 = decode_entities($printer['Addr2']);
+  $addr3 = decode_entities($printer['Addr3']);
+  $addr4 = decode_entities($printer['Addr4']);
+  $addr5 = decode_entities($printer['Addr5']);
+  $disclaimer = decode_entities($printer['Disclaimer']);
+
+  if (isset($form_state['values']['ajax']['ManualTime'])) {
+    $manual_time = $form_state['values']['ajax']['ManualTime'];
+  } else {
+    $manual_time = NULL;
+  }
+
+  if (isset($form_state['values']['ajax']['TicketId'])) {
+    $ticket_id = check_plain($form_state['values']['ajax']['TicketId']);
+  } else {
+    $now = chpuser_datetime_utc_to_utc('now');
+    $seed = sprintf("%04d", $enforcer['Id']);
+    $ticket_id = $now->format("ymd").$seed.$now->format("Hi");
+  }
+
+  $width = '3in';
+
+  if (chdbtick_insert_ticket
+      ($company_id, $enforcer_id, $property_id, $lot_id,
+       $admin_id, $ticket_id, $manual_time,
+       $code, $description, $amount,
+       $lpn, $make, $model, $color,
+       $comment, $header, $company,
+       $addr1, $addr2, $addr3, $addr4, $addr5,
+       $disclaimer, $width,
+       $id)) {
+    drupal_set_message('Could not insert ticket', 'error');
+    return;
+  }
+
+  // Insert vehicle on freq-user list
+  $freq_user = chdbprop_get_freq_user($lpn);
+  if (empty($freq_user)) {
+    if (chdbprop_insert_freq_user
+	($property_id, $lpn, $make, $model, $color)) {
+      drupal_set_message('Could not insert freq user', 'error');
+      return;
+    }
+  } else {
+    if (chdbprop_update_freq_user
+	($property_id, $lpn, $make, $model, $color)) {
+      drupal_set_message('Could not update freq user', 'error');
+      return;
+    }
+  }
+
+  // Stats
+  if (chdbtick_stats_new
+      ($company_id, $property_id, $lot_id, $enforcer_id,
+       $admin_id, $ticket_id, $amount, $lpn)) {
+    drupal_set_message('Could not insert ticket stats', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpticklist';
+}
+
+
+
+/**********
+ ********** Ticket add pdf
+ ********** Address: chptickpdf
+ ********** Access:  'anai chp list tickets'
+ *********/
+
+
+
+function chptick_pdf_form($ticket_id, $company_id, $enforcer_id) {
+  global $user;
+  $ticket = chdbtick_get_ticket($company_id, $enforcer_id, $ticket_id);
+
+  $layout = chdbprop_get_ticketprinter
+    ($company_id, $enforcer_id, FALSE,
+     $ticket['PropertyId'], $ticket['LotId']);
+  if (empty($layout)) {
+    $layout = chdbprop_get_ticketprinter
+      ($company_id, $enforcer_id, TRUE,
+       NULL, NULL);
+  }
+  //print_r($layout); exit();
+
+  $property = chdbprop_get_property($ticket['PropertyId']);
+  $ticket['TicketProperty'] = $property['Street'].', '.$property['City'];
+  $ticket['TicketLayout'] = $layout;
+  $pdf = new PDF('P', 'mm', array(101, 210));
+  $pdf->SetMargins(12,-4,1);
+  $pdf->SetAutoPageBreak(FALSE);
+  $pdf->Body($ticket);
+  $pdf->Output();
+}
+
+
+
+/**********
+ ********** Ticket list
+ ********** Address: chpticklist
+ ********** Access:  'anai chp list tickets'
+ *********/
+
+
+
+function chptick_list_form($form_state) {
+  if (isset($form_state['storage']['confirm_delete'])) {
+    return confirm_form($form, 'Are you sure?', 'chpticklist',
+  			'The ticket will be deleted permanently from the system.');
+  }
+
+  if ($form_state['storage']['detailed_edit']) {
+    unset($form_state['storage']['detailed_edit']);
+    return chptick_list_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Tickets'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  if ((!in_array('Admin', array_values($account->roles)) and $account->status) and
+      $account->uid != 1) {
+    $settings['show_regions'] = TRUE;
+    $settings['show_clients'] = TRUE;
+  }
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chptick_list_form_submit_back';
+  if (user_access('anai chp add tickets')) {
+    $settings['buttons']['add']['submit'] = 'chptick_list_form_submit_add';
+  }
+  if (user_access('anai chp config printer')) {
+    $settings['buttons']['printer']['submit'] = 'chptick_list_form_submit_printer';
+  }
+  if (user_access('anai chp list ticket violations')) {
+    $settings['buttons']['violations'] =
+      array('title' => t('Violations'),
+	    'submit' => 'chptick_list_form_submit_violations');
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  // Create enforcer options
+  $options = array();
+  foreach (chpprop_retrieve_enforcers($user->uid, $company_id, $property_id, $lot_id)
+	   as $enforcer_id => $enforcer) {
+    $options[$enforcer_id] =
+      decode_entities($enforcer['data']['Alias']).', '.
+      decode_entities($enforcer['data']['Street']).', '.
+      decode_entities($enforcer['data']['City']);
+  }
+
+  if (empty($options)) {
+    $form['ajax']['error'] =
+      array('#value' => t('Enforcers yet to be configured on lot, impossible to continue.').'<p>');
+    return $form;
+  }
+
+  // Layout enforcer options
+  if (!isset($form_state['storage']['ajax']['EnforcerId'])) {
+    $form_state['storage']['ajax']['EnforcerId'] = key($options);
+  }
+  $form['ajax']['EnforcerId'] =
+    array('#type' => 'select',
+	  '#title' => t('Enforcer'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['EnforcerId'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  $tickets = array();
+
+  foreach (chdbtick_get_tickets($company_id,
+				$form_state['storage']['ajax']['EnforcerId'],
+				$property_id,
+				$lot_id) as $ticket) {
+    $tickets[$ticket['TicketId']] = $ticket;
+  }
+
+  if (empty($tickets)) {
+    $form['ajax']['empty'] =
+      array('#value' => '<p>'.t('Empty. Currently no active tickets.').'<p>');
+    return $form;
+  }
+
+  if (!empty($tickets)) {
+    $form['ajax']['tickets'] = array('#type' => 'fieldset', '#title' => t('Tickets'));
+    $form['ajax']['tickets']['list'] = chptick_list_table_form($tickets);
+    /* $form['ajax']['tickets']['export'] = */
+    /*   array('#value' => l(t('Export'), */
+    /* 			  'chptickexp/'. */
+    /* 			  $company_id.'/'.$property_id.'/'. */
+    /* 			  $lot_id.'/'.($all_lots ? 1 : 0))); */
+  }
+
+  return $form;
+}
+
+function chptick_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chptick_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chptickadd';
+}
+
+function chptick_list_form_submit_printer($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chptickprn';
+}
+
+function chptick_list_form_submit_violations($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chptickviolist';
+}
+
+function chptick_list_table_form($entries) {
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chptick_list_table');
+
+  if (user_access('anai chp edit tickets')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $admins = array();
+  $looper = 0;
+  foreach ($entries as $ticket_id => $entry) {
+    $form['db']['idd_'.$looper] =
+      array('#type' => 'hidden', '#value' => $entry['Id']);
+
+    if (!empty($entry['ManualTime'])) {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['TicketTime']);
+      $form['db']['created_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+    } else {
+      $created = chpuser_datetime_utc_to_usertimezone($entry['ManualTime']);
+      $form['db']['created_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+    }
+
+    if (!isset($admins[$entry['AdminId']])) {
+      $admins[$entry['AdminId']] =
+	chdbprop_get_enforceradmin($entry['CompanyId'], $entry['EnforcerId'], $entry['AdminId']);
+    }
+    $admin = $admins[$entry['AdminId']];
+    $name = decode_entities($admin['FirstName']).' '.decode_entities($admin['LastName']);
+    $form['db']['name_'.$looper] = array('#value' => $name);
+
+    $form['db']['ticket_'.$looper] = array('#value' => $entry['TicketId']);
+    $form['db']['code_'.$looper] = array('#value' => $entry['Code']);
+    $form['db']['lpn_'.$looper] = array('#value' => $entry['LPN']);
+    $form['db']['amount_'.$looper] = array('#value' => $entry['Amount']);
+
+    if ($readonly or $entry['readonly']) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$entry['Id'],
+	      '#submit' => array('chptick_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chptick_list_table($form) {
+  // Table Header
+  $header = array('Created', 'By', 'Ticket', 'Code', 'LPN', 'Amount', '');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'code_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('code_'));
+    $rows[] = array(drupal_render($form['created_'.$looper]),
+		    drupal_render($form['name_'.$looper]),
+		    drupal_render($form['ticket_'.$looper]),
+		    drupal_render($form['code_'.$looper]),
+		    drupal_render($form['lpn_'.$looper]),
+		    drupal_render($form['amount_'.$looper]),
+		    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1));
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chptick_list_edit_form($form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $ticket = chdbtick_get_ticket_id($id);
+
+  drupal_set_title(t('Ticket TICK', array('TICK' => $ticket['TicketId'])));
+
+  $header = array(t('LPN'), t('Make'), t('Model'), t('Color'), t('Comment'));
+  $rows[] = array(decode_entities($ticket['LPN']),
+		  decode_entities($ticket['Make']),
+		  decode_entities($ticket['Model']),
+		  decode_entities($ticket['Color']),
+		  decode_entities($ticket['Comment']));
+  $form['pop'] = array('#value' => theme_table($header, $rows));
+  $submit_needed = FALSE;
+
+  if (empty($ticket['ManualTime'])) {
+    $form['view'] =
+      array('#value' => l(t('View ticket'),
+			  'chptickpdf/'.
+			  $ticket['TicketId'].'/'.
+			  $ticket['CompanyId'].'/'.
+			  $ticket['EnforcerId'],
+			  array('attributes' => array('target' => '_blank'))));
+  }
+
+  if (!$ticket['Paid']) {
+    $form['paid'] =
+      array('#type' => 'checkbox',
+	    '#title' => t('Ticket is paid'));
+    $form['ticket_id'] =
+      array('#type' => 'hidden',
+	    '#value' => $ticket['TicketId']);
+    $submit_needed = TRUE;
+  } else {
+    $form['paid'] =
+      array('#type' => 'checkbox',
+	    '#title' => t('Ticket is paid'),
+	    '#disabled' => TRUE,
+	    '#default_value' => TRUE);
+  }
+
+  if (!$ticket['Paid']) {
+    $form['withdrawn'] =
+      array('#type' => 'checkbox',
+	    '#title' => t('Withdraw ticket'));
+    $form['ticket_id'] =
+      array('#type' => 'hidden',
+	    '#value' => $ticket['TicketId']);
+    $submit_needed = TRUE;
+  } else {
+    $form['withdrawn'] =
+      array('#type' => 'checkbox',
+	    '#title' => t('Withdraw ticket'),
+	    '#disabled' => TRUE,
+	    '#default_value' => !$ticket['Active']);
+  }
+
+  if (!$ticket['Paid']) {
+    $form['Resolution'] =
+      array('#type' => 'textarea',
+	    '#title' => t('Resolution'),
+	    '#maxlength' => 512);
+  } else {
+    $form['Resolution'] =
+      array('#type' => 'textarea',
+	    '#title' => t('Resolution'),
+	    '#disabled' => TRUE,
+	    '#default_value' => decode_entities($ticket['Resolution']));
+  }
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+  	  '#validate' => array('chptick_list_edit_form_validate_save'));
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+  	  '#submit' => array('chptick_list_edit_form_submit_back'));
+  if (user_access('anai chp delete tickets')) {
+    $form['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+  	    '#submit' => array('chptick_list_edit_form_submit_delete'));
+  }
+  return $form;
+}
+
+function chptick_list_edit_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpticklist';
+}
+
+function chptick_list_edit_form_submit_save($form, &$form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+
+  if ($form_state['values']['paid']) {
+    if (chdbtick_update_ticket_paid
+	($id,
+	 check_plain($form_state['values']['Resolution']))) {
+      drupal_set_message('Could not update ticket', 'error');
+      return;
+    }
+  }
+
+  if ($form_state['values']['withdrawn']) {
+    if (chdbtick_update_ticket_active
+	($id,
+	 check_plain($form_state['values']['Resolution']))) {
+      drupal_set_message('Could not update ticket', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpticklist';
+}
+
+function chptick_list_edit_form_submit_delete($form, &$form_state) {
+  $form_state['storage']['confirm_delete'] = TRUE;
+}
+
+function chptick_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    if (chdbtick_delete_ticket_id($id)) {
+      drupal_set_message('Could not delete ticket', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpticklist';
+    return;
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    //drupal_set_message('Detailed edit of id:'.$id);
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Export ticket
+ ********** Address: chptickexp
+ ********** Access:  'anai chp export tickets'
+ *********/
+
+
+
+function chptick_export_form($company_id, $property_id, $lot_id, $all_lots) {
+
+  $tickets = array();
+  foreach (chdbtick_get_tickets
+	   ($company_id, $property_id, !$all_lots, $lot_id) as $ticket) {
+    $ticket_id = $ticket['TicketId'];
+    $tickets[$ticket_id] = $ticket;
+  }
+
+  global $user;
+  $properties = chpprop_retrieve_properties($user->uid);
+  $policy = chdbprop_get_policy($property_id, $lot_id);
+
+  drupal_set_header('Content-Type: text/csv; charset=utf-8');
+  drupal_set_header('Content-Disposition: attachment; filename=tickets.csv');
+
+  // create a file pointer connected to the output stream
+  $output = fopen('php://output', 'w');
+
+  // output the column headings
+  fputcsv($output,
+	  array('LPN',
+		'Ticket',
+		'Created',
+		'Code',
+		'Description',
+		'Amount',
+		'ajax',
+		'Lot'));
+
+  // loop over the rows, outputting them
+  foreach ($tickets as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $property = $properties[$entry['PropertyId']];
+    $str =
+      $property['data']['Alias'].', '.
+      $property['data']['Street1'].', '.
+      $property['data']['City'];
+    fputcsv($output,
+	    array($entry['LPN'],
+		  $entry['TicketId'],
+		  $created->format("M j,y H:i"),
+		  decode_entities($entry['Code']),
+		  decode_entities($entry['Description']),
+		  $entry['Amount'],
+		  $str,
+		  $policy['Alias']));
+  }
+}
+
+
+

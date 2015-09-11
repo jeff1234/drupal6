@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Device
+description = Device management
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

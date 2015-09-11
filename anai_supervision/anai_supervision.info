@@ -1,0 +1,5 @@
+; $Id$
+name = ANAI Supervision Module
+description = Server to accept Supervision Requests
+core = 6.x
+package = ANAI

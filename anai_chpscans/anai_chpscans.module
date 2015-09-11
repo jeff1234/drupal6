@@ -1,0 +1,917 @@
+<?php
+// $Id$
+require_once("anai_chpscans.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * Scan Management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpscans_perm() {
+  return array('anai chp list scans',
+	       'anai chp edit scans',
+	       'anai chp delete scans',
+	       'anai chp search scans',
+	       );
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpscans_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpscan_scans_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpscans_menu() {
+  $items['chpscanlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpscan_list_form'),
+     'access arguments' => array('anai chp list scans'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpscanpopup/%/%'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpscan_popup_form', 1, 2),
+     'access arguments' => array('anai chp list scans'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpscansearch'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpscan_search_form'),
+     'access arguments' => array('anai chp search scans'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Scan list
+ ********** Address: chpscanlist
+ ********** Access:  'anai chp list scans'
+ *********/
+
+
+
+function chpscan_list_form($form_state) {
+  if ($form_state['storage']['detailed_view']) {
+    return chpscan_list_view_form($form_state);
+  }
+  if ($form_state['storage']['detailed_edit']) {
+    return chpscan_list_edit_form($form_state);
+  }
+
+  drupal_set_title(t('License Plate Recognition'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chpscan_list_form_submit_back';
+  $settings['buttons']['search']['submit'] = 'chpscan_list_form_submit_search';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $properties = array($property_id);
+  $lots = array($lot_id);
+
+  $lane_options = array();
+  foreach (chpprop_retrieve_lanes($user->uid, $company_id, $property_id, $lot_id)
+	   as $lane_id => $lane) {
+    $lane_options[$lane_id] = decode_entities($lane['data']['Alias']);
+  }
+
+  /* foreach (chdbprop_get_all_lanes($property_id) as $lane) { */
+  /*   $lane_options[$lane['LaneId']] = decode_entities($lane['Alias']); */
+  /* } */
+
+  if (empty($lane_options)) {
+    $form['ajax']['error'] =
+      array('#value' => '<p>'.t('Lanes missing.').'<p>');
+    return $form;
+  }
+
+  if (!isset($form_state['storage']['ajax']['AllLanes'])) {
+    $form_state['storage']['ajax']['AllLanes'] = TRUE;
+  }
+  $form['ajax']['AllLanes'] =
+    array('#type' => 'checkbox',
+	  '#title' => t('All lanes'),
+	  '#default_value' => $form_state['storage']['ajax']['AllLanes'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ($form_state['storage']['ajax']['AllLanes']) {
+    foreach ($lane_options as $key => $value) {
+      $form_state['storage']['ajax']['Lanes'][$key] = $key;
+    }
+  } else {
+    if ($form_state['storage']['ajax']['CompanyChanged'] or
+	$form_state['storage']['ajax']['PropertyChanged'] or
+	$form_state['storage']['ajax']['LotChanged']) {
+      unset($form_state['storage']['ajax']['Lanes']);
+    }
+    if (!isset($form_state['storage']['ajax']['Lanes'])) {
+      $form_state['storage']['ajax']['Lanes'] = array();
+    }
+    $form['ajax']['Lanes'] =
+      array('#type' => 'checkboxes',
+	    '#title' => t('Lanes'),
+	    '#options' => $lane_options,
+	    '#default_value' => $form_state['storage']['ajax']['Lanes']);
+    $form['ajax']['LanesUpdate'] =
+      array('#type' => 'button',
+	    '#value' => t('Set'));
+  }
+
+  $options = array();
+  $options['Midnight'] = t('Since midnight');
+  $options['24h'] = t('Last 24h');
+  $options['Yesterday'] = t('Yesterday');
+  $options['Weekdays'] = t('Past weekdays');
+  $options['Weekend'] = t('Past weekend');
+  if (!isset($form_state['storage']['ajax']['Window'])) {
+    $form_state['storage']['ajax']['Window'] = key($options);
+  }
+  $form['ajax']['Window'] =
+    array('#type' => 'radios',
+	  '#title' => t('Time window'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['ajax']['Window'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if ($form_state['storage']['ajax']['Window'] === 'Midnight') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->setTime(0,0,0);
+    $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+    $start_time = $now->format("Y-m-d H:i:s");
+    $stop_time = 'ANY';
+
+    $lanes = array();
+    foreach ($form_state['storage']['ajax']['Lanes'] as $key => $value) {
+      if (!$value) {
+	continue;
+      }
+      $lanes[] = $key;
+    }
+
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+    				$start_time, $stop_time);
+  } elseif ($form_state['storage']['ajax']['Window'] === 'Yesterday') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->setTime(0,0,0);
+    $now->modify("-1 day");
+    $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+    $start_time = $now->format("Y-m-d H:i:s");
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->setTime(23,59,0);
+    $now->modify("-1 day");
+    $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+    $stop_time = $now->format("Y-m-d H:i:s");
+
+    $lanes = array();
+    foreach ($form_state['storage']['ajax']['Lanes'] as $key => $value) {
+      if (!$value) {
+	continue;
+      }
+      $lanes[] = $key;
+    }
+
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+    				$start_time, $stop_time);
+  } elseif ($form_state['storage']['ajax']['Window'] === '24h') {
+    $now = chpuser_datetime_utc_to_utc('now');
+    $now->modify("-1 day");
+    $start_time = $now->format("Y-m-d H:i:s");
+    $stop_time = 'ANY';
+
+    $lanes = array();
+    foreach ($form_state['storage']['ajax']['Lanes'] as $key => $value) {
+      if (!$value) {
+	continue;
+      }
+      $lanes[] = $key;
+    }
+
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+    				$start_time, $stop_time);
+  } elseif ($form_state['storage']['ajax']['Window'] === 'Weekdays') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    $now->modify(sprintf("-%d days", (int)$now->format("N") - 1));
+    $now->setTime(0,0,0);
+    $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+    $start_time = $now->format("Y-m-d H:i:s");
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    if (5 < (int)$now->format("N")) {
+      $now->modify(sprintf("-%d days", (int)$now->format("N") - 5));
+      $now->setTime(23,59,0);
+      $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+      $stop_time = $now->format("Y-m-d H:i:s");
+    } else {
+      $stop_time = 'ANY';
+    }
+
+    $lanes = array();
+    foreach ($form_state['storage']['ajax']['Lanes'] as $key => $value) {
+      if (!$value) {
+	continue;
+      }
+      $lanes[] = $key;
+    }
+
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+    				$start_time, $stop_time);
+  } elseif ($form_state['storage']['ajax']['Window'] === 'Weekend') {
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    if (5 < (int)$now->format("N")) {
+      $now->modify(sprintf("-%d days", (int)$now->format("N") - 5));
+      $now->setTime(0,0,0);
+      $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+      $start_time = $now->format("Y-m-d H:i:s");
+    } else {
+      $now->modify(sprintf("-%d days", (int)$now->format("N") - 1));
+      $now->modify("-2 days");
+      $now->setTime(0,0,0);
+      $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+      $start_time = $now->format("Y-m-d H:i:s");
+    }
+    $now = chpuser_datetime_utc_to_usertimezone('now');
+    if (5 < (int)$now->format("N")) {
+      $stop_time = 'ANY';
+    } else {
+      $now->modify(sprintf("-%d days", (int)$now->format("N") - 1));
+      $now->modify("-1 day");
+      $now->setTime(23,59,0);
+      $now = chpuser_datetime_usertimezone_to_utc($now->format("Y-m-d H:i:s"));
+      $stop_time = $now->format("Y-m-d H:i:s");
+    }
+
+    $lanes = array();
+    foreach ($form_state['storage']['ajax']['Lanes'] as $key => $value) {
+      if (!$value) {
+	continue;
+      }
+      $lanes[] = $key;
+    }
+
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+    				$start_time, $stop_time);
+  }
+
+  $now = chpuser_datetime_utc_to_usertimezone('now');
+  $form['ajax']['time'] =
+    array('#value' => $now->format("D, M j, Y H:i:s"));
+
+  $form['ajax']['Info'] =
+    array('#value' => '<p>'.t('Number of scans: NUM', array('NUM' => count($scans))));
+
+  if (100 < count($scans)) {
+    $options = array();
+    for ($i = 0, $n = 100; $i < count($scans);) {
+      $options[($i + 1).'_'.$n] = ($i + 1).' to '.$n;
+      $i += 100;
+      if ((count($scans) - $i) > 100) {
+	$n += 100;
+      } else {
+	$n += count($scans) - $i;
+      }
+    }
+    if (!isset($form_state['storage']['ajax']['Slice'])) {
+      $form_state['storage']['ajax']['Slice'] = key($options);
+    }
+    $form['ajax']['Slice'] =
+      array('#type' => 'select',
+	    '#title' => t('Display'),
+	    '#options' => $options,
+	    '#default_value' => $form_state['storage']['ajax']['Slice'],
+	    '#ahah' => array('event' => 'change',
+			     'path' => ahah_helper_path(array('ajax')),
+			     'wrapper' => 'ajax-wrapper'));
+    list($starting, $ending) = sscanf($form_state['storage']['ajax']['Slice'], "%d_%d");
+    $scans = array_slice($scans, $starting, $ending - $starting);
+  }
+
+  if (!empty($scans)) {
+    $form['ajax']['Scans'] = chpscan_scans_table_form($scans, $lane_options);
+  }
+  return $form;
+}
+
+function chpscan_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpscan_list_form_submit_search($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpscansearch';
+}
+
+function chpscan_scans_table_form($entries, $lane_options) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpscan_scans_table');
+
+  if (user_access('anai chp edit scans')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $entry) {
+    $str = $entry['OrgLPN'];
+    if (1 == $user->uid) {
+      $str .= ' ('.$entry['NumReads'].')';
+    }
+    $form['db']['orglpn_'.$looper] = array('#value' => $str);
+
+    $str = '';
+    if ($entry['OrgLPN'] !== $entry['LPN']) {
+      $str = $entry['LPN'];
+    }
+    $form['db']['lpn_'.$looper] = array('#value' => $str);
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['AgentTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("D, M j, Y H:i:s"));
+
+    $form['db']['lane_'.$looper] = array('#value' => $lane_options[$entry['LaneId']]);
+
+    if ($entry['LPImgRecvd']) {
+      $lpimg = chdbscan_get_lpimg_id($entry['LPImgId'], $entry['DB']);
+      if ($lpimg['Format'] === 'LPImg') {
+	chpscan_image_extract_lpfile($entry, $lpimg, $imagefile);
+	$img = '<img src="/'.$imagefile.'" width="100" height="25" border="0" alt="">';
+
+	$carimg = chdbscan_get_carimg_id($entry['CarImgId'], $entry['DB']);
+	if ($carimg['Format'] === 'CarImg') {
+	  chpscan_image_extract_carfile($entry, $carimg, $imagefile);
+	  $link = l($img, $imagefile,
+		    array('attributes' => array('rel' => 'lightbox',
+						'title' => $entry['LPN']),
+			  'html' => TRUE));
+	} else {
+	  $link = $img;
+	}
+
+
+	$form['db']['lpimg_'.$looper] = array('#value' => $link);
+      } else {
+	$form['db']['lpimg_'.$looper] = array('#value' => $lpimg['Text']);
+      }
+    } elseif (2 == $entry['LPImgLoc']) {
+      $form['db']['lpimg_'.$looper] =
+	array('#value' => t('In progress...'),
+	      '#prefix' => '<center>',
+	      '#suffix' => '</center>');
+    } elseif (1 == $entry['LPImgLoc']) {
+      $form['db']['lpimg_'.$looper] =
+	array('#value' => t('(missing)'),
+	      '#prefix' => '<center>',
+	      '#suffix' => '</center>');
+    } elseif (0 == $entry['LPImgLoc']) {
+      $img = t('(empty)');
+      $carimg = chdbscan_get_carimg_id($entry['CarImgId'], $entry['DB']);
+      if ($carimg['Format'] === 'CarImg') {
+	chpscan_image_extract_carfile($entry, $carimg, $imagefile);
+	$link = l($img, $imagefile,
+		  array('attributes' => array('rel' => 'lightbox',
+					      'title' => t('Read not possible')),
+			'html' => FALSE));
+      } else {
+	$link = $img;
+      }
+
+      $form['db']['lpimg_'.$looper] =
+	array('#value' => $link,
+	      '#prefix' => '<center>',
+	      '#suffix' => '</center>');
+    } else {
+      $form['db']['lpimg_'.$looper] =
+	array('#value' => t('ERROR'),
+	      '#prefix' => '<center>',
+	      '#suffix' => '</center>');
+    }
+
+    if ($entry['Entry']) {
+      $direction = 'Entry';
+    } elseif ($entry['Exit']) {
+      $direction = 'Exit';
+    } else {
+      $direction = '--';
+    }
+    if ($entry['White']) {
+      $validation = '<img src="'.drupal_get_path('module', 'anai').'/greenled_s.png">';
+    } elseif ($entry['Yellow']) {
+      $validation = '<img src="'.drupal_get_path('module', 'anai').'/yellowled_s.png">';
+    } elseif ($entry['Black']) {
+      $validation = '<img src="'.drupal_get_path('module', 'anai').'/purpleled_s.png">';
+    } elseif ($entry['Red']) {
+      $validation = '<img src="'.drupal_get_path('module', 'anai').'/redled_s.png">';
+    } else {
+      $validation = '--';
+    }
+
+    $form['db']['direction_'.$looper] = array('#value' => $direction);
+    $form['db']['validation_'.$looper] = array('#value' => $validation);
+
+    $form['scandb_'.$looper] = array('#type' => 'hidden', '#value' => $entry['DB']);
+
+    $form['db']['view_'.$looper] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/viewsmall.png',
+	    '#name' => 'op_view'.$entry['Id'].'__'.$looper,
+	    '#submit' => array('chpscan_list_form_submit'));
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$entry['Id'].'__'.$looper,
+	      '#submit' => array('chpscan_list_form_submit'));
+    }
+
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpscan_scans_table($form) {
+  // Table Header
+  $header = array(t('Time'),
+		  t('LPN'),
+		  t('Plate'),
+		  t('Correction'),
+		  t('Lane'),
+		  t('Dir'),
+		  t('Status'),
+		  '', '');
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'time_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('time_'));
+    $rows[] = array(drupal_render($form['time_'.$looper]),
+                    drupal_render($form['orglpn_'.$looper]),
+		    array('data' => drupal_render($form['lpimg_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    drupal_render($form['lpn_'.$looper]),
+                    drupal_render($form['lane_'.$looper]),
+                    drupal_render($form['direction_'.$looper]),
+                    array('data' => drupal_render($form['validation_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    array('data' => drupal_render($form['view_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpscan_popup_form($form_state, $path, $image) {
+  $img = '<img src="'.$path.'/'.$image.'" border="0" alt="">';
+  $form['pre'] = array
+    ('#value' => t('Overview image'));
+  $form['info'] = array
+    ('#value' => $img,
+     '#prefix' => '<table><tr><td>',
+     '#suffix' => '</td></tr></table>');
+  $form['post'] = array
+    ('#value' => t('Please close window when done'));
+  return $form;
+}
+
+function chpscan_list_form_submit($form, &$form_state) {
+  if (isset($form_state['storage']['confirm_delete']) and
+      $form_state['storage']['confirm_delete']) {
+    $id = $form_state['values']['edit_id']; //anai_dbg($id, '$id');
+    $db = $form_state['values']['scan_db']; //anai_dbg($db, '$db');
+    $scan = chdbscan_get_scan_id($id, $db); //anai_dbg($scan, '$scan');
+
+    if (2 == $scan['LPImgLoc']) {
+      if (chdbscan_delete_lpimg_id($scan['LPImgId'], $db)) {
+	drupal_set_message('Could not delete plate image', 'error');
+	return;
+      }
+    }
+
+    if (2 == $scan['CarImgLoc']) {
+      if (chdbscan_delete_carimg_id($scan['CarImgId'], $db)) {
+	drupal_set_message('Could not delete car image', 'error');
+	return;
+      }
+    }
+
+    if (chdbscan_delete_scan_id($id, $db)) {
+      drupal_set_message('Could not delete scan', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpscanlist';
+    return;
+  }
+
+  $id = -1;
+  $looper = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strpos($key, 'op_view') !== FALSE) {
+      $id = substr($key, strlen('op_view'), strpos($key, "__") - strlen('op_view'));
+      $looper = substr($key, strpos($key, '__') + 2);
+      break;
+    }
+  }
+  if ($id > 0) {
+    $db = $form_state['values']['ajax']['Scans']['scandb_'.$looper];
+    $form_state['storage']['view_id'] = $id;
+    $form_state['storage']['scan_db'] = $db;
+    $form_state['storage']['detailed_view'] = TRUE;
+    return;
+  }
+  $id = -1;
+  $looper = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strpos($key, 'op_edit') !== FALSE) {
+      $id = substr($key, strlen('op_edit'), strpos($key, "__") - strlen('op_edit'));
+      $looper = substr($key, strpos($key, '__') + 2);
+      break;
+    }
+  }
+  if ($id > 0) {
+    $db = $form_state['values']['ajax']['Scans']['scandb_'.$looper];
+    $form_state['storage']['edit_id'] = $id;
+    $form_state['storage']['scan_db'] = $db;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+function chpscan_list_view_form($form_state) {
+  drupal_set_title(t('Detailed view'));
+  $form = array();
+
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/back.png',
+  	  '#submit' => array('chpscan_list_view_form_submit_back'),
+	  '#suffix' => '<p>');
+
+  $id = $form_state['storage']['view_id'];
+  $db = $form_state['storage']['scan_db'];
+
+  $scan = chdbscan_get_scan_id($id, $db);
+  $scan['DB'] = $db;
+  //anai_dbg($scan);
+
+  $carimg = chdbscan_get_carimg_id($scan['CarImgId'], $db);
+  //anai_dbg($carimg);
+
+  if ($carimg['Format'] === 'CarImg') {
+    chpscan_image_extract_carfile($scan, $carimg, $imagefile);
+    //anai_dbg($imagefile);
+
+    $tag = '<img src="'.$imagefile.'" border="0" alt="">';
+    //anai_dbg($tag);
+  } else {
+    $tag = $carimg['Text'];
+  }
+
+  $form['CarImg'] = array('#value' => $tag);
+  return $form;
+}
+
+function chpscan_list_view_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']['detailed_view']);
+}
+
+
+
+function chpscan_list_edit_form($form_state) {
+  global $user;
+  $form = array();
+
+  $id = $form_state['storage']['edit_id'];
+  $db = $form_state['storage']['scan_db'];
+  $form['edit_id'] = array('#type' => 'hidden', '#value' => $id);
+  $form['scan_db'] = array('#type' => 'hidden', '#value' => $db);
+
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form($form, 'Are you sure?', 'chpscanlist',
+  			'The scan will be deleted from the system.');
+  }
+
+  drupal_set_title(t('Edit scan'));
+
+  ahah_helper_register($form, $form_state);
+
+  $scan = chdbscan_get_scan_id($id, $db);
+  $scan['DB'] = $db;
+  //anai_dbg($scan);
+
+  $carimg = chdbscan_get_carimg_id($scan['CarImgId'], $db);
+  //anai_dbg($carimg);
+
+  if ($carimg['Format'] === 'CarImg') {
+    chpscan_image_extract_carfile($scan, $carimg, $imagefile);
+    //anai_dbg($imagefile);
+
+    $tag = '<img src="'.$imagefile.'" border="0" alt="" width="100%">';
+    //anai_dbg($tag);
+  } else {
+    $tag = $carimg['Text'];
+  }
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  if (!isset($form_state['values']['edit_id'])) {
+    if (isset($form_state['storage']['ajax']['LPN'])) {
+      unset($form_state['storage']['ajax']['LPN']);
+    }
+  }
+  if (!isset($form_state['storage']['ajax']['LPN'])) {
+    $form_state['storage']['ajax']['LPN'] = $scan['LPN'];
+  }
+  $form['ajax']['LPN'] =
+    array('#type' => 'textfield',
+	  '#title' => t('License Plate Number'),
+	  '#maxlength' => 10,
+	  '#size' => 15,
+	  '#default_value' => $form_state['storage']['ajax']['LPN'],
+	  '#description' => '(No spaces)',
+	  '#attributes' => array('onBlur'=>'this.value=this.value.toUpperCase()'),
+	  '#prefix' => '<table><tr><td width="40%">',
+	  '#suffix' => '</td>');
+
+  $form['ajax']['CarImg'] =
+    array('#value' => $tag,
+	  '#prefix' => '<td width="60%">',
+	  '#suffix' => '</td></tr></table>');
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpscan_list_edit_form_validate_save'),
+	  '#submit' => array('chpscan_list_edit_form_submit_save'));
+
+  $form['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpscan_list_edit_form_submit_cancel'));
+
+  if (user_access('anai chp delete scans')) {
+    $form['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+   	    '#submit' => array('chpscan_list_edit_form_submit_delete'));
+  }
+
+  return $form;
+}
+
+function chpscan_list_edit_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']['detailed_edit']);
+}
+
+function chpscan_list_edit_form_submit_delete($form, &$form_state) {
+  $form_state['storage']['confirm_delete'] = TRUE;
+}
+
+function chpscan_list_edit_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['ajax']['LPN'])) {
+    form_set_error('ajax][LPN', 'License plate number field is required.');
+    return;
+  }
+  if (preg_match('/\s/', $form_state['values']['ajax']['LPN'])) {
+    form_set_error('ajax][LPN',
+		   'License plate number shall be given without any spaces.');
+    return FALSE;
+  }
+  if ($form_state['values']['ajax']['LPN'] === '...') {
+    form_set_error('ajax][LPN', 'License plate number must be real.');
+    return;
+  }
+}
+
+function chpscan_list_edit_form_submit_save($form, &$form_state) {
+  $id = $form_state['values']['edit_id'];
+  $db = $form_state['values']['scan_db'];
+  $scan = chdbscan_get_scan_id($id, $db);
+  $lpn = check_plain($form_state['values']['ajax']['LPN']);
+
+  // Update LPR Scan tables
+  if (chdbscan_update_scan_id($id, $db, $lpn)) {
+    drupal_set_message('Could not update scan', 'error');
+    return;
+  }
+
+  // Update Occupancy tables
+  if ($scan['Entry']) {
+    if (chpoccu_update_entry_scan($scan['PropertyId'], $scan['LotId'],
+				  $scan['ScanId'], $scan['AgentTime'],
+				  $lpn)) {
+      drupal_set_message('Could not update entry scan', 'error');
+      return;
+    }
+  } elseif ($scan['Exit']) {
+    if (chpoccu_update_exit_scan($scan['PropertyId'], $scan['ScanId'], $lpn)) {
+      drupal_set_message('Could not update exit scan', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']['detailed_edit']);
+}
+
+
+
+/**********
+ ********** Scan search
+ ********** Address: chpscansearch
+ ********** Access:  'anai chp search scans'
+ *********/
+
+
+
+function chpscan_search_form($form_state) {
+
+  drupal_set_title(t('Search License Plate Number'));
+
+  global $user;
+  $account = user_load(array('uid' => $user->uid));
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['include_company_any'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['include_property_any'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['include_lot_any'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chpscan_search_form_submit_back';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $properties = array();
+  $lots = array();
+  $lanes = array();
+
+  if ($property_id !== 'ANY') {
+    $properties[] = $property_id;
+  }
+
+  if ($lot_id !== 'ANY') {
+    $lots[] = $lot_id;
+  }
+
+  if ($property_id === 'ANY') {
+    foreach ($form_state['storage']['ajax']['Lots'] as $propkey => $lots) {
+      $properties[] = $propkey;
+      foreach ($form_state['storage']['ajax']['Lots'][$propkey] as $lotkey => $policy) {
+	$lots[] = $lotkey;
+      }
+    }
+  } elseif ($lot_id === 'ANY') {
+    foreach ($form_state['storage']['ajax']['Lots'][$property_id] as $lotkey => $policy) {
+      $lots[] = $lotkey;
+    }
+  }
+
+  if ((in_array('Admin', array_values($account->roles)) and $account->status) or
+      $account->uid == 1) {
+    foreach (chdbprop_cc_get_lanes_admin($company_id, $property_id, $lot_id,
+					 'ANY', 'ANY') as $lane) {
+      $lanes[] = $lane['LaneId'];
+    }
+  } else {
+    foreach (chdbprop_cc_get_lanes($company_id, $property_id, $lot_id,
+				   'ANY', 'ANY') as $lane) {
+      $lanes[] = $lane['LaneId'];
+    }
+  }
+
+  if (empty($properties) or empty($lots) or empty($lanes)) {
+    $form['ajax']['Empty'] =
+      array('#value' => t('License Plate Recognition missing on selected lot.'));
+    return $form;
+  }
+
+  if (!isset($form_state['storage']['ajax']['LPN'])) {
+    $form_state['storage']['ajax']['LPN'] = '';
+  } elseif (strlen($form_state['storage']['ajax']['LPN'])) {
+    $form_state['storage']['ajax']['LPN'] =
+      strtoupper($form_state['storage']['ajax']['LPN']);
+  }
+  $form['ajax']['LPN'] =
+    array('#type' => 'textfield',
+	  '#title' => t('License Plate Number'),
+	  '#maxlength' => 10,
+	  '#default_value' => $form_state['storage']['ajax']['LPN'],
+	  '#description' => '(No spaces)',
+	  '#attributes' => array('onBlur'=>'this.value=this.value.toUpperCase()'));
+
+  $form['ajax']['SearchUpdate'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/search.png',
+	  '#suffix' => '<p><p>',
+	  '#ahah' => array('event' => 'click',
+			   'path' => ahah_helper_path(array('ajax')),
+			   'wrapper' => 'ajax-wrapper'));
+
+  if (!empty($form_state['storage']['ajax']['LPN'])) {
+    $scans = chdbscan_get_scans($properties, $lots, $lanes,
+				'ANY', 'ANY',
+				$form_state['storage']['ajax']['LPN']);
+
+    $form['ajax']['List'] =
+      array('#value' => t('Number of hits: NUM', array('NUM' => count($scans))));
+  }
+
+  return $form;
+}
+
+function chpscan_search_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpscanlist';
+}
+
+
+

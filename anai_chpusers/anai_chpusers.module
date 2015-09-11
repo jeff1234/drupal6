@@ -1,0 +1,530 @@
+<?php
+// $Id$
+require_once("anai_chpusers.inc");
+
+
+
+/**
+ * @file
+ * ANAI Condo and Hotel Portal (Users)
+ *
+ * Main module for the ANAI Condo and Hotel Portal.
+ * Handles all user registrations.
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+function anai_chpusers_user($op, &$edit, &$account, $category = NULL) {
+  include_once drupal_get_path('module', 'location') .'/location.inc';
+  switch ($op) {
+  case 'register':
+    // Add legal
+    $fields['legal_agreement'] =
+      array('#type' => 'fieldset', '#title' => t('Legal Agreement'));
+    $fields['legal_agreement']['decision'] =
+      array('#type' => 'radios',
+	    '#description' => t('By registering at %site-name, you agree TBD',
+				array('%site-name' => variable_get('site_name', 'drupal'))),
+	    '#default_value' => 0,
+	    '#options' => array(t('I disagree'), t('I agree')));
+    return $fields;
+  case 'validate':
+    // Make sure legal is accepted
+    if (isset($edit['decision']) and $edit['decision'] != '1') {
+      form_set_error('decision',
+		     t('You must agree to the Legal Agreement before registration can be completed.'));
+    }
+    break;
+  case 'submit':
+    $account = user_load(array('uid' => $account->uid));
+    // Perform GEO coding
+    $location = array();
+    $location['street'] = $account->profile_street1;
+    $location['additional'] = $account->profile_street2;
+    $location['city'] = $account->profile_city;
+    $location['postal_code'] = $account->profile_postal_code;
+    $location['country'] = trim($account->profile_country, '*');
+    $location['province'] = $account->profile_state;
+    $pos = location_latlon_exact($location);
+    if (!$pos) {
+      drupal_set_message(t('GEO coding of the address failed'), 'error');
+      //echo anai_chpusers_format_account_profile($account);
+      $edit['profile_latlon_ok'] = FALSE;
+      return;
+    }
+    // Add GEO coding
+    $edit['profile_lat'] = $pos['lat'];
+    $edit['profile_lon'] = $pos['lon'];
+    $edit['profile_latlon_ok'] = TRUE;
+  case 'insert':
+    // Save a proof of registration in log file
+    watchdog('user', t('User %user agreed to legal terms', array('%user' => $account->name)));
+    //echo anai_chpusers_format_account_profile($account);
+    break;
+  }
+}
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpusers_perm() {
+  return array('anai chp edit user affiliates',
+	       'anai chp list user affiliates');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpusers_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpusers_affiliates_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpusers_menu() {
+  $items = array();
+  $items['chpuserschange'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpusers_affiliates_change_form'),
+     'access arguments' => array('anai chp edit user affiliates'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpuserslist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpusers_affiliates_list_form'),
+     'access arguments' => array('anai chp list user affiliates'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Change user affiliates
+ ********** Address: chpuserschange
+ ********** Access:  'anai chp edit user affiliates'
+ *********/
+
+
+
+function chpusers_select_role_form($form_state) {
+  drupal_set_title(t('Affiliates'));
+  //$form['chp'] = array('#type' => 'fieldset');
+
+  $options = array();
+  foreach(user_roles(TRUE) as $role) {
+    if (!strcmp($role, 'authenticated user')) {
+      continue;
+    }
+    $options[$role] = $role;
+  }
+  $form['chp']['role'] =
+    array('#type' => 'select',
+	  '#title' => t('Select role of user getting the affiliates'),
+	  '#options' => $options);
+  $form['submit'] =
+    array('#type' => 'submit',
+	  '#value' => t('Continue'),
+	  '#validate' => array('chpusers_select_role_form_validate_continue'),
+	  '#submit' => array('chpusers_select_role_form_submit'));
+  $form['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpusers_select_role_form_validate_back'),
+	  '#submit' => array('chpusers_select_role_form_submit'));
+  return $form;
+}
+
+function chpusers_select_role_form_validate_continue($form, &$form_state) {
+  $form_state['storage']['continue'] = TRUE;
+}
+
+function chpusers_select_role_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpusers_select_role_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpuserslist';
+    return;
+  }
+  if ($form_state['storage']['continue']) {
+    $form_state['storage']['role'] = $form_state['values']['role'];
+    return;
+  }
+}
+
+function chpusers_select_user_form($form_state, $role) {
+  drupal_set_title(t('Affiliates'));
+  //$form['chp'] = array('#type' => 'fieldset');
+
+  $users = chpusers_retrieve_global_users($role);
+  $options = array();
+  foreach($users as $user) {
+    $options[$user['uid']] = $user['username'].' ('.$user['fullname'].' - '.$user['city'].')';
+  }
+  $form['chp']['user'] =
+    array('#type' => 'select',
+	  '#title' => t('Select user getting the affiliates'),
+	  '#options' => $options);
+  $form['chp']['submit'] =
+    array('#type' => 'submit',
+	  '#value' => t('Continue'),
+	  '#validate' => array('chpusers_select_user_form_validate_continue'),
+	  '#submit' => array('chpusers_select_user_form_submit'));
+  $form['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpusers_select_user_form_validate_back'),
+	  '#submit' => array('chpusers_select_user_form_submit'));
+  return $form;
+}
+
+function chpusers_select_user_form_validate_continue($form, &$form_state) {
+  $form_state['storage']['continue'] = TRUE;
+}
+
+function chpusers_select_user_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpusers_select_user_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpuserslist';
+    return;
+  }
+  if ($form_state['storage']['continue']) {
+    $form_state['storage']['user'] = $form_state['values']['user'];
+    return;
+  }
+}
+
+function chpusers_select_sibling_form($form_state, $siblings) {
+  if (!isset($form['chp'])) {
+    $form['chp'] =
+      array('#type' => 'fieldset', '#title' => t(''));
+  }
+  $options = array();
+  foreach ($siblings as $sibling) {
+    $options[$sibling] = $sibling;
+  }
+  $form['chp']['sibling'] =
+    array('#type' => 'radios',
+	  '#title' => t('Select role of sibling'),
+	  '#options' => $options,
+	  '#default_value' => current($options));
+  $form['chp']['submit'] =
+    array('#type' => 'submit',
+	  '#value' => t('Continue'),
+	  '#validate' => array('chpusers_select_sibling_form_validate'));
+  return $form;
+}
+
+function chpusers_select_sibling_form_validate($form, &$form_state) {
+  $form_state['storage']['sibling'] = $form_state['values']['sibling'];
+}
+
+function chpusers_affiliates_change_form($form_state) {
+  if ($form_state['storage']['confirm']) {
+    return confirm_form($form, 'Are you sure?', 'chpuserslist',
+			'The affiliation will override current settings.');
+  }
+
+  if (!$form_state['storage']['role']) {
+    return chpusers_select_role_form($form_state);
+  }
+
+  if (!$form_state['storage']['user']) {
+    return chpusers_select_user_form($form_state, $form_state['storage']['role']);
+  }
+
+  $account = user_load(array('uid' => $form_state['storage']['user']));
+  drupal_set_title(t('Affiliates for: ').$account->profile_name);
+  //$form['chp'] = array('#type' => 'fieldset');
+
+  $siblings = chpusers_retrieve_siblings($form_state['storage']['role']);
+
+  if (count($siblings) == 0) {
+    $form['chp']['empty'] =
+      array('#value' => t('The selected role is not allowed to control any affiliates.'));
+    $form['back'] =
+      array('#type' => 'submit',
+	    '#value' => t('Back'),
+	    '#validate' => array('chpusers_affiliates_change_form_validate_back'));
+    return $form;
+  } elseif (count($siblings) > 1 and !$form_state['storage']['sibling']) {
+    $form['chp']['siblings'] =
+      array('#type' => 'hidden', '#value' => serialize($siblings));
+    return chpusers_select_sibling_form($form_state, $siblings);
+  } else {
+    $form_state['storage']['sibling'] = current($siblings);
+  }
+
+  $users = chpusers_retrieve_global_users($form_state['storage']['sibling']);
+  // print_r($users);
+  $users = chpusers_filter_global_users($form_state['storage']['user'], $users);
+  // print_r($users);
+  $form['chp']['list'] = chpusers_affiliates_table_form($users);
+
+  $form['save'] =
+    array('#type' => 'submit',
+	  '#value' => t('Submit'),
+	  '#validate' => array('chpusers_affiliates_change_form_validate_save'),
+	  '#submit' => array('chpusers_affiliates_change_form_submit'));
+
+  $form['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpusers_affiliates_change_form_validate_back'));
+  return $form;
+}
+
+function chpusers_affiliates_change_form_validate_save($form, &$form_state) {
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chpusers_affiliates_change_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpusers_affiliates_table_form($entries, $readonly = FALSE) {
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpusers_affiliates_table');
+  $looper = 0;
+  foreach ($entries as $entry) {
+    $form['db']['idd_'.$looper] =
+      array('#type' => 'hidden', '#value' => $entry['uid']);
+    $form['db']['username_'.$looper] =
+      array('#value' => $entry['username']);
+    $form['db']['fullname_'.$looper] =
+      array('#value' => $entry['fullname']);
+    $form['db']['city_'.$looper] =
+      array('#value' => $entry['city']);
+    $form['db']['default_'.$looper] =
+      array('#type' => 'hidden', '#value' => $entry['affiliated']);
+    if (!$readonly) {
+      $form['db']['select_'.$looper] =
+	array('#type' => 'checkbox',
+	      '#default_value' => $entry['affiliated'],
+	      '#prefix' => '<center>',
+	      '#suffix' => '</center>');
+    } else {
+      if ($entry['affiliated']) {
+	$form['db']['select_'.$looper] =
+	  array('#value' => t('Yes'));
+      } else {
+	$form['db']['select_'.$looper] =
+	  array('#value' => t('No'));
+      }
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpusers_affiliates_table($form) {
+  $header = array('Username', 'Full name', 'City', 'Affiliated');
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'select_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('select_'));
+    $rows[] = array(drupal_render($form['username_'.$looper]),
+		    drupal_render($form['fullname_'.$looper]),
+		    drupal_render($form['city_'.$looper]),
+		    drupal_render($form['select_'.$looper]),
+                    );
+  }
+  return theme_table($header, $rows);
+}
+
+function chpusers_affiliates_change_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpuserschange';
+    return;
+  }
+  if ($form_state['storage']['confirm']) {
+    foreach ($form_state['storage']['select'] as $uid => $value) {
+      if ($value != $form_state['storage']['default'][$uid]) {
+	if ($value) {
+	  chpuser_append_affiliate($uid, $form_state['storage']['user']);
+	} else {
+	  chpuser_remove_affiliate($uid, $form_state['storage']['user']);
+	}
+      }
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpuserslist';
+    return;
+  }
+  if ($form_state['storage']['save']) {
+    $loopers = array();
+    foreach ($form_state['values'] as $key => $value) {
+      if (strstr($key, 'select_')) {
+	$loopers[substr($key, strlen('select_'))] = $value;
+      }
+    }
+    foreach ($loopers as $key => $value) {
+      $uid = $form_state['values']['idd_'.$key];
+      $form_state['storage']['select'][$uid] = $value;
+    }
+    $loopers = array();
+    foreach ($form_state['values'] as $key => $value) {
+      if (strstr($key, 'default_')) {
+	$loopers[substr($key, strlen('default_'))] = $value;
+      }
+    }
+    foreach ($loopers as $key => $value) {
+      $uid = $form_state['values']['idd_'.$key];
+      $form_state['storage']['default'][$uid] = $value;
+    }
+    foreach ($form_state['storage']['select'] as $uid => $value) {
+      if ($value != $form_state['storage']['default'][$uid]) {
+	$form_state['storage']['confirm'] = TRUE;
+	break;
+      }
+    }
+    return;
+  }
+}
+
+
+
+/**********
+ ********** List user affiliates
+ ********** Address: chpuserslist
+ ********** Access:  'anai chp list user affiliates'
+ *********/
+
+
+
+function chpusers_affiliates_list_form($form_state) {
+  if (!$form_state['storage']['role']) {
+    return chpusers_select_role_form($form_state);
+  }
+
+  if (!$form_state['storage']['user']) {
+    return chpusers_select_user_form($form_state, $form_state['storage']['role']);
+  }
+
+  if ($form_state['storage']['edit']) {
+    return chpusers_affiliates_change_form($form_state);
+  }
+
+  $account = user_load(array('uid' => $form_state['storage']['user']));
+  drupal_set_title(t('Affiliates for: ').$account->profile_name);
+  //$form['chp'] = array('#type' => 'fieldset');
+
+  $siblings = chpusers_retrieve_siblings($form_state['storage']['role']);
+
+  if (count($siblings) == 0) {
+    $form['chp']['empty'] =
+      array('#value' => t('The selected role is not allowed to control any affiliates.').'<p>');
+    $form['back'] =
+      array('#type' => 'submit',
+	    '#value' => t('Back'),
+	    '#validate' => array('chpusers_affiliates_list_form_validate_back'));
+    return $form;
+  } elseif (count($siblings) > 1 and !$form_state['storage']['sibling']) {
+    $form['chp']['siblings'] =
+      array('#type' => 'hidden', '#value' => serialize($siblings));
+    return chpusers_select_sibling_form($form_state, $siblings);
+  } else {
+    $form_state['storage']['sibling'] = current($siblings);
+  }
+
+  $users = chpusers_retrieve_global_users($form_state['storage']['sibling']);
+  $users = chpusers_filter_global_users($form_state['storage']['user'], $users);
+  $form['chp']['list'] = chpusers_affiliates_table_form($users, TRUE);
+
+  if (user_access('anai chp edit user affiliates')) {
+    $form['edit'] =
+      array('#type' => 'submit',
+	    '#value' => t('Edit'),
+	    '#validate' => array('chpusers_affiliates_list_form_validate_edit'));
+  }
+
+  $form['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpusers_affiliates_list_form_validate_back'));
+  return $form;
+}
+
+function chpusers_affiliates_list_form_validate_edit($form, &$form_state) {
+  $form_state['storage']['edit'] = TRUE;
+}
+
+function chpusers_affiliates_list_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpusers_affiliates_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpuserslist';
+    return;
+  }
+  if ($form_state['storage']['confirm']) {
+    foreach ($form_state['storage']['select'] as $uid => $value) {
+      if ($value != $form_state['storage']['default'][$uid]) {
+	if ($value) {
+	  chpuser_append_affiliate($uid, $form_state['storage']['user']);
+	} else {
+	  chpuser_remove_affiliate($uid, $form_state['storage']['user']);
+	}
+      }
+    }
+    unset($form_state['storage']['confirm']);
+    unset($form_state['storage']['edit']);
+    return;
+  }
+}
+
+
+

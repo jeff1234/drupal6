@@ -1,0 +1,507 @@
+<?php
+// $Id$
+require_once("anai_chpdevice_meter.inc");
+require_once("anai_chpdevice_videopark.inc");
+require_once("anai_chpdevice_securepark.inc");
+
+require_once("anai_chpdevice_ccpark.inc");
+
+
+/**
+ * @file
+ * ANAI
+ *
+ * ANAI Cloud computing main module
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpdevice_perm() {
+  return array(// Device summary page
+	       'anai chp add devices',
+	       'anai chp list devices',
+	       'anai chp edit devices',
+	       'anai chp delete devices',
+	       // Pay and Display
+	       'anai chp add meter',
+	       'anai chp list meter',
+	       'anai chp edit meter',
+	       'anai chp delete meter',
+	       // Meter rates
+	       'anai chp add meter rates',
+	       'anai chp list meter rates',
+	       'anai chp edit meter rates',
+	       'anai chp delete meter rates',
+	       // Meter alarms
+	       'anai chp list meter alarms',
+	       'anai chp edit meter alarms',
+	       // Videopark
+	       'anai chp add videopark',
+	       'anai chp list videopark',
+	       'anai chp edit videopark',
+	       // Securepark
+	       'anai chp add securepark',
+	       'anai chp list securepark',
+	       'anai chp edit securepark');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpdevice_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpdevice_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpdevice_meter_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpdevice_meter_alarms_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpdevice_meternew_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     /* 'chpdevice_meter_rates_maxcharge_table' => */
+     /* array('arguments' => array('fieldset' => NULL)), */
+     /* 'chpdevice_meter_rates_groups_table' => */
+     /* array('arguments' => array('fieldset' => NULL)), */
+     /* 'chpdevice_meter_rates_passes_table' => */
+     /* array('arguments' => array('fieldset' => NULL)), */
+     'chpdevice_videopark_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     'chpdevice_securepark_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+     );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpdevice_menu() {
+  $items = array();
+  $items['chpdeviceadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_add_form'),
+     'access arguments' => array('anai chp add devices'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevice'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_list_form'),
+     'access arguments' => array('anai chp list devices'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicemeteradd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_meter_add_form'),
+     'access arguments' => array('anai chp add meter'),
+     'type' => MENU_CALLBACK,
+     );
+  /* $items['chpdevicemeterrate'] = array */
+  /*   ('page callback' => 'drupal_get_form', */
+  /*    'page arguments' => array('chpdevice_meter_rates_form'), */
+  /*    'access arguments' => array('anai chp list meter'), */
+  /*    'type' => MENU_CALLBACK, */
+  /*    ); */
+  $items['chpdevicemeter'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_meter_form'),
+     'access arguments' => array('anai chp list meter'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicemeteralarms/%'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_meter_alarms_form', 1),
+     'access arguments' => array('anai chp list meter alarms'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicevpadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_videopark_add_form'),
+     'access arguments' => array('anai chp add videopark'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicevp'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_videopark_form'),
+     'access arguments' => array('anai chp list videopark'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicespaddd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_securepark_add_form'),
+     'access arguments' => array('anai chp add securepark'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpdevicesp'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpdevice_securepark_form'),
+     'access arguments' => array('anai chp list securepark'),
+     'type' => MENU_CALLBACK,
+     );
+ return $items;
+}
+
+
+
+/**********
+ ********** Add device
+ ********** Address: chpdeviceadd
+ ********** Access:  'anai chp add devices
+ *********/
+
+
+
+function chpdevice_add_form($form_state) {
+  drupal_set_title(t('Add device'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+  $equipment_id = $policy['EquipmentId'];
+  $equipment = chdbprop_get_equipment($equipment_id);
+
+  if (empty($policy['data']['EquipmentId'])) {
+    $form['ajax']['error'] =
+      array('#value' => '<p>'.t('Lot yet to be configured for equipment, impossible to continue.').'<p>');
+    $form['ajax']['cancel'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	    '#submit' => array('chpdevice_add_form_submit_cancel'));
+    return $form;
+  }
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpdevice_add_form_validate_save'),
+	  '#submit' => array('chpdevice_add_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpdevice_add_form_submit_cancel'));
+  return $form;
+}
+
+function chpdevice_add_form_validate_save($form, &$form_state) {
+  if (isset($form_state['values']['ajax']['Alias']) and
+      empty($form_state['values']['ajax']['Alias'])) {
+    form_set_error('ajax][Alias', 'Device name field is required.');
+    return;
+  }
+}
+
+function chpdevice_add_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevice';
+}
+
+function chpdevice_add_form_submit_save($form, &$form_state) {
+  global $user;
+  $property_id = $form_state['values']['ajax']['PropertyId'];
+  $lot_id = $form_state['values']['ajax']['LotId'];
+  $policy = chdbprop_get_policy($property_id, $lot_id);
+  $equipment_id = $policy['EquipmentId'];
+  $device_id = chpprop_genRandomString20();
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevice';
+}
+
+
+
+/**********
+ ********** Devices
+ ********** Address: chpdevice
+ ********** Access:  'anai chp list devices'
+ *********/
+
+
+
+function chpdevice_list_form($form_state) {
+  if ($form_state['storage']['detailed_edit']) {
+    return chpdevice_edit_form($form_state);
+  }
+
+  drupal_set_title(t('Devices'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['tag'] = 'ajax';
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['buttons']['back']['submit'] = 'chpdevice_list_form_submit_back';
+  if (user_access('anai chp add devices')) {
+    //$settings['buttons']['add']['submit'] = 'chpdevice_list_form_submit_add';
+  }
+  $settings['buttons']['meter']['prefix'] = '<p>';
+  $settings['buttons']['meter']['image'] =
+    drupal_get_path('module', 'anai_chpdevice').'/meter.png';
+  $settings['buttons']['meter']['attributes'] = array('width' => '15%');
+  $settings['buttons']['meter']['submit'] = 'chpdevice_list_form_submit_meter';
+  $settings['buttons']['vp']['image'] =
+    drupal_get_path('module', 'anai_chpdevice').'/videopark.png';
+  $settings['buttons']['vp']['attributes'] = array('width' => '15%');
+  $settings['buttons']['vp']['submit'] = 'chpdevice_list_form_submit_videopark';
+  $settings['buttons']['sp']['image'] =
+    drupal_get_path('module', 'anai_chpdevice').'/securepark.png';
+  $settings['buttons']['sp']['attributes'] = array('width' => '15%');
+  $settings['buttons']['sp']['submit'] = 'chpdevice_list_form_submit_securepark';
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['ajax']['CompanyId'];
+  $property_id = $form_state['storage']['ajax']['PropertyId'];
+  $lot_id = $form_state['storage']['ajax']['LotId'];
+
+  $policy = $form_state['storage']['ajax']['Lots'][$property_id][$lot_id];
+  $equipment_id = $policy['data']['EquipmentId'];
+
+  if (empty($policy['data']['EquipmentId'])) {
+    $form['ajax']['error'] =
+      array('#value' => '<p>'.t('Equipment policy missing.').'<p>');
+    return $form;
+  }
+
+  /* $devices = chdbccpark_get_devices($property_id, $equipment_id); */
+
+  /* if (empty($devices)) { */
+  /*   $form['ajax']['list'] = array('#value' => t('Empty.')); */
+  /* } else { */
+  /*   $form['ajax']['list'] = chpdevice_list_table_form($devices); */
+  /* } */
+
+  return $form;
+}
+
+function chpdevice_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpdevice_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdeviceadd';
+}
+
+function chpdevice_list_form_submit_meter($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevicemeter';
+}
+
+function chpdevice_list_form_submit_videopark($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevicevp';
+}
+
+function chpdevice_list_form_submit_securepark($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevicesp';
+}
+
+function chpdevice_list_table_form($entries) {
+  global $user;
+  $form['db'] = array('#type' => 'markup', '#theme' => 'chpdevice_list_table');
+
+  if (user_access('anai chp edit devices')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+
+  $looper = 0;
+  foreach ($entries as $device) {
+    $form['db']['name_'.$looper] = array('#value' => decode_entities($device['Alias']));
+
+    if ($device['Entry']) {
+      $form['db']['entrygate_'.$looper] = array('#value' => chpdevice_menu_text($device['EntryGate']));
+    } else {
+      $form['db']['entrygate_'.$looper] = array('#value' => t(''));
+    }
+
+    if ($device['Entry']) {
+      $link = '<img src="'.drupal_get_path('module', 'anai').'/neutralled.png">';
+      $form['db']['entrystatus_'.$looper] = array('#value' => $link);
+    } else {
+      $form['db']['entrystatus_'.$looper] = array('#value' => '');
+    }
+
+    if ($device['Exit']) {
+      $form['db']['exitgate_'.$looper] = array('#value' => chpdevice_menu_text($device['ExitGate']));
+    } else {
+      $form['db']['exitgate_'.$looper] = array('#value' => t(''));
+    }
+
+    if ($device['Exit']) {
+      $link = '<img src="'.drupal_get_path('module', 'anai').'/neutralled.png">';
+      $form['db']['exitstatus_'.$looper] = array('#value' => $link);
+    } else {
+      $form['db']['exitstatus_'.$looper] = array('#value' => '');
+    }
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/editsmall.png',
+	      '#name' => 'op_edit'.$device['Id'],
+	      '#submit' => array('chpdevice_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpdevice_list_table($form) {
+  // Table Header
+  $header = array(t('Name'),
+		  array('data' => t('Entry'),
+			'colspan' => 2),
+		  array('data' => t('Exit'),
+			'colspan' => 2),
+		  '');
+  $rows = array();
+  // Table Rows
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'name_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('name_'));
+    $rows[] = array(drupal_render($form['name_'.$looper]),
+                    drupal_render($form['entrygate_'.$looper]),
+                    array('data' => drupal_render($form['entrystatus_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    drupal_render($form['exitgate_'.$looper]),
+                    array('data' => drupal_render($form['exitstatus_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    array('data' => drupal_render($form['edit_'.$looper]),
+			  'width' => 1, 'height' => 1),
+                    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpdevice_edit_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form
+      ($form, 'Are you sure?', 'chpdevice',
+       'The device will be deleted from the system.');
+  }
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $id = $form_state['storage']['id'];
+  $device = chdbccpark_get_device_id($id);
+  $equipment_id = $device['EquipmentId'];
+  $equipment = chdbprop_get_equipment($equipment_id);
+
+  drupal_set_title(t('Edit device'));
+
+  $form['ajax'] =
+    array('#prefix' => '<div id="ajax-wrapper">',
+	  '#suffix' => '</div>',
+	  '#tree' => TRUE);
+
+  $form['ajax']['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpdevice_add_form_validate_save'),
+	  '#submit' => array('chpdevice_edit_form_submit_save'));
+
+  $form['ajax']['cancel'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpdevice_edit_form_submit_cancel'));
+  return $form;
+}
+
+function chpdevice_edit_form_submit_cancel($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevice';
+}
+
+function chpdevice_edit_form_submit_save($form, &$form_state) {
+  $id = $form_state['storage']['id'];
+  $device = chdbccpark_get_device_id($id);
+
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpdevice';
+}
+
+function chpdevice_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    $device = chdbccpark_get_device_id($id);
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpdevice';
+    return;
+  }
+
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+}
+
+
+

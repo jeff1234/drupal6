@@ -1,0 +1,558 @@
+<?php
+// $Id$
+require_once("anai_chpalerts.inc");
+
+
+/**
+ * @file
+ * ANAI CHP Alerts
+ *
+ * Alert management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+function anai_chpalerts_cron() {
+  $datetime1 = chpuser_datetime_utc_to_utc('now');
+  if (chdbalert_delete_links_retention_older_than
+      ($datetime1->format("Y-m-d H:i:s"), ALERT_LINK_RETENTION_DAYS)) {
+    watchdog('anai_chpalerts',
+	     'chdbalert_delete_links_retention_older_than '.
+	     $datetime1->format("Y-m-d H:i:s").' failed');
+  }
+
+  $alerts = chdbalert_get_all_alerts();
+  $action_needed = FALSE;
+
+  foreach ($alerts as $alert) {
+    if ($alert['Trigger'] === 'Hourly') {
+      $account = user_load(array('uid' => $alert['UID']));
+      if ($account === FALSE) {
+	continue;
+      }
+      $now = chpuser_datetime_utc_to_usertimezone('now', $account->timezone);
+      $action_needed = TRUE;
+      $stop = $now->format("Y-m-d H:i:s");
+    } elseif ($alert['Trigger'] === 'Daily') {
+      $account = user_load(array('uid' => $alert['UID']));
+      if ($account === FALSE) {
+	continue;
+      }
+      $now = chpuser_datetime_utc_to_usertimezone('now', $account->timezone);
+      if ($now->format("H") == 0) {
+	$action_needed = TRUE;
+      }
+      $stop = $now->format("Y-m-d H:i:s");
+    } elseif ($alert['Trigger'] === 'Weekly') {
+      $account = user_load(array('uid' => $alert['UID']));
+      if ($account === FALSE) {
+	continue;
+      }
+      $now = chpuser_datetime_utc_to_usertimezone('now', $account->timezone);
+      if ($now->format("N") == 1 and $now->format("H") == 0) {
+	$action_needed = TRUE;
+      }
+      $stop = $now->format("Y-m-d H:i:s");
+    } elseif ($alert['Trigger'] === 'Monthly') {
+      $account = user_load(array('uid' => $alert['UID']));
+      if ($account === FALSE) {
+	continue;
+      }
+      $now = chpuser_datetime_utc_to_usertimezone('now', $account->timezone);
+      if ($now->format("j") == 1 and $now->format("H") == 0) {
+	$action_needed = TRUE;
+      }
+      $stop = $now->format("Y-m-d H:i:s");
+    }
+    if (!$action_needed) {
+      continue;
+    }
+
+    // If here then action is needed, check AlertType with
+    // deliver method according to ActionType
+    if (!empty($alert['LastTime'])) {
+      $startobj = chpuser_datetime_utc_to_usertimezone
+	($alert['LastTime'], $account->timezone);
+    } else {
+      $startobj = chpuser_datetime_utc_to_usertimezone
+	($alert['CreateTime'], $account->timezone);
+    }
+    $start = $startobj->format("Y-m-d H:i:s");
+
+    if ($alert['AlertType'] === 'Permit_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'Permit/';
+      $link .= 'Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'PermitRevenue_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'PermitRev/';
+      $link .= 'Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'Whitelist_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'WhiteList/';
+      $link .= 'Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'Tickets_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'Tickets/Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'TicketRevenue_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'TickRev/Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'Complaints_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'Complaints/Range/'.$start.'/'.$stop;
+    } elseif ($alert['AlertType'] === 'Boots_Report') {
+      $link = 'chpreport/';
+      $link .= $alert['CompanyId'].'/';
+      $link .= $alert['L1'].'/';
+      $link .= $alert['L2'].'/';
+      $link .= 'Boots/Range/'.$start.'/'.$stop;
+    } else {
+      $link = 'chpalertlist';
+    }
+
+    if (chdbalert_update_action($alert['Id'])) {
+      watchdog('chpalerts', 'update_action failed');
+    }
+
+    if ($alert['ActionType'] === 'Message') {
+      if (chdbalert_insert_new_link
+	  ($alert['CompanyId'],
+	   $alert['UID'],
+	   $link,
+	   $alert['AlertType'])) {
+	watchdog('chpalerts', 'insert_new_link failed');
+      }
+    } elseif ($alert['ActionType'] === 'Email') {
+      if (chdbalert_insert_new_email
+	  ($alert['CompanyId'],
+	   $alert['UID'],
+	   $alert['A1'], // Email address
+	   $link,
+	   $alert['AlertType'])) {
+	watchdog('chpalerts', 'insert_new_email failed');
+      }
+    }
+  }
+}
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpalerts_perm() {
+  return array('anai chp add alerts',
+	       'anai chp list alerts');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpalerts_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpalert_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+    );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpalerts_menu() {
+  $items = array();
+  $items['chpalertadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpalert_add_form'),
+     'access arguments' => array('anai chp add alerts'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpalertlist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpalert_list_form'),
+     'access arguments' => array('anai chp list alerts'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Alert add
+ ********** Address: chpalertadd
+ ********** Access:  'anai chp add alerts'
+ *********/
+
+
+
+function chpalert_add_form($form_state) {
+  drupal_set_title(t('Add new alert'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['show_all_lots'] = FALSE; // Default value
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+  $all_lots = $form_state['storage']['property']['all_lots'];
+  $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+  $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+  $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+
+  $options = array();
+  if (user_access('anai chp access permit report')) {
+    $options['Permit_Report'] = chpalert_alert_type('Permit_Report');
+  }
+  if (user_access('anai chp access permit revenue report')) {
+    $options['PermitRevenue_Report'] = chpalert_alert_type('PermitRevenue_Report');
+  }
+  if (user_access('anai chp access whitelist report')) {
+    $options['Whitelist_Report'] = chpalert_alert_type('Whitelist_Report');
+  }
+  if (user_access('anai chp access tickets report')) {
+    $options['Tickets_Report'] = chpalert_alert_type('Tickets_Report');
+  }
+  if (user_access('anai chp access ticket revenue report')) {
+    $options['TicketRevenue_Report'] = chpalert_alert_type('TicketRevenue_Report');
+  }
+  if (user_access('anai chp access complaints report')) {
+    $options['Complaints_Report'] = chpalert_alert_type('Complaints_Report');
+  }
+  if (user_access('anai chp access boots report')) {
+    $options['Boots_Report'] = chpalert_alert_type('Boots_Report');
+  }
+
+  if (!isset($form_state['storage']['property']['AlertType'])) {
+    $form_state['storage']['property']['AlertType'] = key($options);
+  }
+  $form['property']['AlertType'] =
+    array('#type' => 'select',
+	  '#title' => t('Select alert or notification type'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['AlertType']);
+
+  $options = array();
+  $options['Monthly'] = 'Last day of month'; 
+  $options['Weekly'] = 'Last day of week';
+  $options['Daily'] = 'At midnight';
+  $options['Hourly'] = 'Top of the hour';
+
+  if (!isset($form_state['storage']['property']['Trigger'])) {
+    $form_state['storage']['property']['Trigger'] = key($options);
+  }
+  $form['property']['Trigger'] =
+    array('#type' => 'radios',
+	  '#title' => t('Select frequency of alert or notification'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Trigger']);
+
+  $options = array();
+  $options['Message'] = 'Available at next login';
+  $options['Email'] = 'Email delivery';
+
+  if (!isset($form_state['storage']['property']['ActionType'])) {
+    $form_state['storage']['property']['ActionType'] = key($options);
+  }
+  $form['property']['ActionType'] =
+    array('#type' => 'select',
+	  '#title' => t('Select alert or notification type'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['ActionType'],
+	  '#ahah' => array('event' => 'change',
+			   'path' => ahah_helper_path(array('property')),
+			   'wrapper' => 'property-wrapper'));
+
+  if ($form_state['storage']['property']['ActionType'] === 'Email') {
+    if (!isset($form_state['storage']['property']['Email'])) {
+      $form_state['storage']['property']['Email'] = $user->mail;
+    }
+    $form['property']['Email'] =
+      array('#type' => 'textfield',
+	    '#title' => t('Delivery email address'),
+	    '#maxlength' => 64,
+	    '#default_value' => $form_state['storage']['property']['Email']);
+  }
+
+  $form['property']['continue'] =
+    array('#type' => 'submit',
+	  '#value' => t('Continue'),
+	  '#validate' => array('chpalert_add_form_validate_save'),
+	  '#submit' => array('chpalert_add_form_submit'));
+
+  $form['property']['back'] =
+    array('#type' => 'submit',
+	  '#value' => t('Back'),
+	  '#validate' => array('chpalert_add_form_validate_back'),
+	  '#submit' => array('chpalert_add_form_submit'));
+  return $form;
+}
+
+function chpalert_add_form_validate_save($form, &$form_state) {
+  $form_state['storage']['save'] = TRUE;
+}
+
+function chpalert_add_form_validate_back($form, &$form_state) {
+  $form_state['storage']['back'] = TRUE;
+}
+
+function chpalert_add_form_submit($form, &$form_state) {
+  if ($form_state['storage']['back']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpalertlist';
+    return;
+  }
+
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+
+  if ($form_state['storage']['save']) {
+    $company_id = $form_state['storage']['property']['CompanyId'];
+    $property_id = $form_state['storage']['property']['PropertyId'];
+    $lot_id = $form_state['storage']['property']['LotId'];
+    $all_lots = $form_state['storage']['property']['all_lots'];
+
+    global $user;
+    if (chdbalert_insert_new_alert
+    	($company_id,
+	 $user->uid,
+    	 $form_state['storage']['property']['AlertType'],
+    	 $form_state['storage']['property']['Trigger'],
+    	 $form_state['storage']['property']['ActionType'],
+    	 $id)) {
+      drupal_set_message('Could not insert new alert', 'error');
+      return;
+    }
+
+    if (chdbalert_update_trigger_levels
+	($id,
+	 $property_id,
+	 $all_lots ? 'All' : $lot_id,
+	 $form_state['storage']['property']['L3'],
+	 $form_state['storage']['property']['L4'],
+	 $form_state['storage']['property']['L5'])) {
+      drupal_set_message('Could not update alert trigger levels', 'error');
+      return;
+    }
+
+    if (chdbalert_update_action_levels
+	($id,
+	 $form_state['storage']['property']['property']['Email'],
+	 $form_state['storage']['property']['A2'],
+	 $form_state['storage']['property']['A3'],
+	 $form_state['storage']['property']['A4'],
+	 $form_state['storage']['property']['A5'])) {
+      drupal_set_message('Could not update alert action levels', 'error');
+      return;
+    }
+
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpalertlist';
+    return;
+  }
+}
+
+
+
+/**********
+ ********** Alerts list
+ ********** Address: chpalertlist
+ ********** Access:  'anai chp list alerts'
+ *********/
+
+
+
+function chpalert_list_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form($form, 'Are you sure?', 'chpalertlist',
+			'The alert will be deleted from the system.');
+  }
+
+  drupal_set_title(t('Alerts'));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  if (user_access('anai chp add alerts')) {
+    $settings['buttons']['add'] =
+      array('title' => t('Add new alert'),
+	    'validate' => 'chpalert_list_form_validate_add',
+	    'submit' => 'chpalert_list_form_submit');
+  }
+  $settings['buttons']['back'] =
+    array('title' => t('Back'),
+	  'validate' => 'chpalert_list_form_validate_back',
+	  'submit' => 'chpalert_list_form_submit');
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+
+  $alerts = chdbalert_get_alerts($company_id, $user->uid);
+
+  if (chdbalert_update_read($company_id, $user->uid)) {
+    drupal_set_message('Could not handle unread', 'error');
+  }
+
+  $dblinks = chdbalert_get_links($company_id, $user->uid);
+
+  if (sizeof($dblinks) > 0) {
+    foreach ($dblinks as $dblink) {
+      $dbtime = chpuser_datetime_utc_to_usertimezone($dblink['CreateTime']);
+      $links[] = l(chpalert_alert_type($dblink['AlertType']).
+		   ' created '.$dbtime->format("D, j M Y H:i"),
+		   $dblink['Link'],
+		   array('attributes' => array('target' => '_blank')));
+    }
+    $form['property']['links'] =
+      array('#value' =>
+	    theme_item_list($links, t('Alerts and notifications').
+			    t(' (will be kept for DAYS days)',
+			      array('DAYS' => ALERT_LINK_RETENTION_DAYS))));
+  }
+
+  if (sizeof($alerts) == 0) {
+    $form['property']['empty'] =
+      array('#value' => '<p>'.t('Empty. No alerts registered.').'<p>');
+  } else {
+    $form['property']['list'] = chpalert_list_table_form($alerts);
+  }
+
+  return $form;
+}
+
+function chpalert_list_form_validate_add($form, &$form_state) {
+  $form_state['storage']['add'] = TRUE;
+}
+
+function chpalert_list_form_validate_back($form, &$form_state) {
+  $form_state['storage']['home'] = TRUE;
+}
+
+function chpalert_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#value' => '',
+	  '#theme' => 'chpalert_list_table');
+  $looper = 0;
+  foreach ($entries as $entry) {
+    $created = chpuser_datetime_utc_to_usertimezone($entry['CreateTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    $form['db']['alerttype_'.$looper] =
+      array('#value' => chpalert_alert_type($entry['AlertType']));
+
+    $form['db']['trigger_'.$looper] = array('#value' => $entry['Trigger']);
+    $form['db']['actiontype_'.$looper] = array('#value' => $entry['ActionType']);
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpalert_list_table($form) {
+  // Table Header
+  $header = array('Created', 'Alert type', 'Trigger', 'Action type');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'time_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('time_'));
+    $rows[] = array(drupal_render($form['time_'.$looper]),
+		    drupal_render($form['alerttype_'.$looper]),
+		    drupal_render($form['trigger_'.$looper]),
+		    drupal_render($form['actiontype_'.$looper]),
+		    );
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpalert_list_form_submit($form, &$form_state) {
+
+  if ($form_state['storage']['add']) {
+    $_SESSION['TemporaryCompanyId'] = $form_state['storage']['property']['CompanyId'];
+    $_SESSION['TemporaryPropertyId'] = $form_state['storage']['property']['PropertyId'];
+    $_SESSION['TemporaryLotId'] = $form_state['storage']['property']['LotId'];
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpalertadd';
+    return;
+  }
+
+  if ($form_state['storage']['home']) {
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'front_page';
+    return;
+  }
+}
+
+
+

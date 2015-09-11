@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Occupancy
+description = Lot Occupancy management
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

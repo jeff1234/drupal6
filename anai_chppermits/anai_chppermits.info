@@ -1,0 +1,7 @@
+; $Id$
+name = ANAI CHP Permits
+description = Permit management module
+core = 6.x
+package = ANAI
+dependencies[] = anai
+

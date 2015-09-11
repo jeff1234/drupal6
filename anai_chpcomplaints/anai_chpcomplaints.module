@@ -1,0 +1,649 @@
+<?php
+// $Id$
+require_once("anai_chpcomplaints.inc");
+
+
+/**
+ * @file
+ * ANAI CHP Complaints
+ *
+ * Complaints management
+ *
+ */
+
+
+
+/**
+ * Implementation of hook_init().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_cron().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_user().
+ * 
+ */
+
+
+
+/**
+ * Implementation of hook_perm().
+ * 
+ */
+function anai_chpcomplaints_perm() {
+  return array('anai chp add complaints',
+	       'anai chp list complaints',
+	       'anai chp edit complaints',
+	       'anai chp solve complaints',
+	       'anai chp delete complaints');
+}
+
+
+
+/**
+ * Implementation of hook_theme().
+ * 
+ */
+function anai_chpcomplaints_theme($existing, $type, $theme, $path) {
+  return array
+    ('chpcomp_list_table' =>
+     array('arguments' => array('fieldset' => NULL)),
+    );
+}
+
+
+
+/**
+ * Implementation of hook_menu().
+ * 
+ */
+function anai_chpcomplaints_menu() {
+  $items = array();
+  $items['chpcompadd'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpcomp_add_form'),
+     'access arguments' => array('anai chp add complaints'),
+     'type' => MENU_CALLBACK,
+     );
+  $items['chpcomplist'] = array
+    ('page callback' => 'drupal_get_form',
+     'page arguments' => array('chpcomp_list_form'),
+     'access arguments' => array('anai chp list complaints'),
+     'type' => MENU_CALLBACK,
+     );
+  return $items;
+}
+
+
+
+/**
+ * Implementation of local functions
+ * 
+ */
+
+
+
+/**********
+ ********** Complaints add
+ ********** Address: chpcompadd
+ ********** Access:  'anai chp add complaints'
+ *********/
+
+
+
+function chpcomp_add_form($form_state) {
+  drupal_set_title(t('Add').' '.strtolower(COMPLAINT_NAME));
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+
+  $options = array();
+  $options['Automatic'] = t('Automatic');
+  $options['Copy'] = t('Copy');
+  if (!isset($form_state['storage']['property']['Category'])) {
+    $form_state['storage']['property']['Category'] = key($options);
+  }
+  $form['property']['Category'] =
+    array('#type' => 'radios',
+	  '#title' => t('Category'),
+	  '#options' => $options,
+	  '#default_value' => $form_state['storage']['property']['Category'],
+	  '#ahah' => array('event' => 'click',
+			   'path' => ahah_helper_path(array('property')),
+			   'wrapper' => 'property-wrapper'));
+
+  if ($form_state['storage']['property']['Category'] === 'Copy') {
+    // Javascript date pickers
+    drupal_add_js
+      ('(function ($) {
+          Drupal.behaviors.ANAIchpcomplaintsCreate=function(context){
+      	    $("#edit-property-CreateTime:not(.CreateTime-processed)",context)
+              .addClass("CreateTime-processed")
+              .AnyTime_picker({format:"%Y-%m-%d %H:%i:%s",hideInput:true,placement:"inline",
+                              askSecond:false,labelTitle:"Created Date and Time"});
+          };
+       }(jQuery));', 'inline');
+
+    $form['property']['CreateTime'] = array('#type' => 'textfield');
+
+    if (!isset($form_state['storage']['property']['ComplaintId'])) {
+      $form_state['storage']['property']['ComplaintId'] = '';
+    }
+    $form['property']['ComplaintId'] =
+      array('#type' => 'textfield',
+	    '#title' => COMPLAINT_NAME.' '.t('id'),
+	    '#maxlength' => 64,
+	    '#default_value' => $form_state['storage']['property']['ComplaintId']);
+  }
+
+  if (!isset($form_state['storage']['Complaint'])) {
+    $form_state['storage']['Complaint'] = '';
+  }
+  $form['Complaint'] =
+    array('#type' => 'textarea',
+	  '#title' => t('Description'),
+	  '#maxlength' => 1024,
+	  '#default_value' => $form_state['storage']['Complaint']);
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+	  '#validate' => array('chpcomp_add_form_validate_save'),
+	  '#submit' => array('chpcomp_add_form_submit_save'));
+
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+	  '#submit' => array('chpcomp_add_form_submit_back'));
+  return $form;
+}
+
+function chpcomp_add_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+}
+
+function chpcomp_add_form_validate_save($form, &$form_state) {
+  if ($form_state['values']['property']['Category'] === 'Copy') {
+    if (empty($form_state['values']['property']['CreateTime'])) {
+      form_set_error('property][CreateTime', 'Time field is required.');
+      return;
+    }
+    if (empty($form_state['values']['property']['ComplaintId'])) {
+      form_set_error('property][ComplaintId', COMPLAINT_NAME.t('id field is required.'));
+      return;
+    }
+    if (is_numeric($form_state['values']['property']['ComplaintId'])) {
+      form_set_error('property][ComplaintId',
+		     'Note id can\'t be only digits. Add a prefix, for example M-'.
+		     $form_state['values']['ComplaintId']);
+      return;
+    }
+    if (chdbcomp_complaint_exists
+	($form_state['values']['property']['CompanyId'],
+	 $form_state['values']['property']['PropertyId'],
+	 $form_state['values']['property']['LotId'],
+	 $form_state['values']['ComplaintId'])) {
+      form_set_error('property][ComplaintId', COMPLAINT_NAME.t('id is already registered.'));
+      return;
+    }
+  }
+  if (empty($form_state['values']['Complaint'])) {
+    form_set_error('Complaint', t('Description field is required.'));
+    return;
+  }
+}
+
+function chpcomp_add_form_submit_save($form, &$form_state) {
+  global $user;
+  $company_id = $form_state['values']['property']['CompanyId'];
+  $property_id = $form_state['values']['property']['PropertyId'];
+  $lot_id = $form_state['values']['property']['LotId'];
+
+  if ($form_state['values']['property']['Category'] === 'Copy') {
+    $created = chpuser_datetime_usertimezone_to_utc
+      ($form_state['values']['property']['CreateTime']);
+
+    if (chdbcomp_insert_complaint
+	($user->uid,
+	 $company_id,
+	 $property_id,
+	 $lot_id,
+	 check_plain($form_state['values']['property']['ComplaintId']),
+	 check_plain($form_state['values']['Complaint']),
+	 $id,
+	 $created->format("Y-m-d H:i:s"))) {
+      drupal_set_message('Could not insert copy', 'error');
+      return;
+    }
+  }
+
+  if ($form_state['values']['property']['Category'] === 'Automatic') {
+    $counter = chpcomp_get_counter($company_id, $property_id);
+    if (empty($counter)) {
+      if (chpcomp_insert_counter($company_id, $property_id, $id)) {
+	drupal_set_message('Could not insert counter', 'error');
+	return;
+      }
+      $counter = chpcomp_get_counter($company_id, $property_id);
+    }
+
+    if (chdbcomp_insert_complaint
+	($user->uid,
+	 $company_id,
+	 $property_id,
+	 $lot_id,
+	 $counter['Counter'],
+	 check_plain($form_state['values']['Complaint']),
+	 $id)) {
+      drupal_set_message('Could not insert new', 'error');
+      return;
+    }
+    if (chpcomp_update_counter_id($counter['Id'])) {
+      drupal_set_message('Could not update counter', 'error');
+      return;
+    }
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+  return;
+}
+
+
+
+/**********
+ ********** Complaints list
+ ********** Address: chpcomplist
+ ********** Access:  'anai chp list complaints'
+ *********/
+
+
+
+function chpcomp_list_form($form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    return confirm_form($form, 'Are you sure?', 'chpcomplist',
+			COMPLAINT_NAME.' will be deleted from the system.');
+  }
+  if ($form_state['storage']['detailed_edit']) {
+    return chpcomp_edit_form($form_state);
+  }
+  if ($form_state['storage']['solve']) {
+    return chpcomp_solve_form($form_state);
+  }
+
+  drupal_set_title(COMPLAINT_NAME);
+
+  global $user;
+  $form = array();
+  ahah_helper_register($form, $form_state);
+
+  $settings = array();
+  $settings['show_companies'] = TRUE;
+  $settings['show_properties'] = TRUE;
+  $settings['show_lots'] = TRUE;
+  $settings['show_all_lots'] = FALSE; // Default value
+  $settings['buttons']['back']['title'] = t('Back');
+  $settings['buttons']['back']['submit'] = 'chpcomp_list_form_submit_back';
+  if (user_access('anai chp add complaints')) {
+    $settings['buttons']['add']['title'] = t('Add').' '.strtolower(COMPLAINT_NAME);
+    $settings['buttons']['add']['submit'] = 'chpcomp_list_form_submit_add';
+  }
+  if (chpprop_produce_header(&$form, &$form_state, $settings)) {
+    return $form;
+  }
+  $company_id = $form_state['storage']['property']['CompanyId'];
+  $property_id = $form_state['storage']['property']['PropertyId'];
+  $lot_id = $form_state['storage']['property']['LotId'];
+  $all_lots = $form_state['storage']['property']['all_lots'];
+
+  $complaints = array();
+  $filter_lot = !$all_lots;
+
+  foreach (chdbcomp_get_complaints
+	   ($company_id, $property_id, $filter_lot, $lot_id, TRUE, TRUE) as $complaint) {
+    if (!$complaint['Fragment']) {
+      $complaints[$complaint['ComplaintId']]['master'] = $complaint;
+      $complaints[$complaint['ComplaintId']]['fragments'] = array();
+    } else {
+      $complaints[$complaint['ComplaintId']]['fragments'][] = $complaint;
+    }
+  }
+
+  if (empty($complaints)) {
+    $form['property']['empty'] =
+      array('#value' => '<p>'.t('Empty.'));
+  } else {
+    $form['property']['list'] = chpcomp_list_table_form($complaints);
+  }
+
+  return $form;
+}
+
+function chpcomp_list_form_submit_add($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcompadd';
+}
+
+function chpcomp_list_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'front_page';
+}
+
+function chpcomp_list_table_form($entries) {
+  global $user;
+  $form['db'] =
+    array('#type' => 'markup', '#theme' => 'chpcomp_list_table');
+  if (user_access('anai chp edit complaints')) {
+    $readonly = FALSE;
+  } else {
+    $readonly = TRUE;
+  }
+  if (user_access('anai chp solve complaints')) {
+    $solveable = FALSE;
+  } else {
+    $solveable = TRUE;
+  }
+  $looper = 0;
+  foreach ($entries as $complaint_id => $entry) {
+    $form['db']['idd_'.$looper] =
+      array('#type' => 'hidden', '#value' => $entry['master']['Id']);
+
+    $created = chpuser_datetime_utc_to_usertimezone($entry['master']['CreateTime']);
+    $form['db']['time_'.$looper] = array('#value' => $created->format("M j,y H:i"));
+
+    $account = user_load(array('uid' => $entry['master']['CreatorUID']));
+    $form['db']['user_'.$looper] = array('#value' => $account->name);
+
+    $form['db']['compid_'.$looper] =
+      array('#value' => decode_entities($entry['master']['ComplaintId']));
+
+    $form['db']['complaint_'.$looper] =
+      array('#value' => decode_entities($entry['master']['Complaint']));
+
+    $form['db']['numfrags_'.$looper.'_'.count($entry['fragments'])] =
+      array('#type' => 'hidden', '#value' => '');
+
+    $frag = 0;
+    foreach ($entry['fragments'] as $fragment) {
+      $created = chpuser_datetime_utc_to_usertimezone($fragment['CreateTime']);
+      $account = user_load(array('uid' => $fragment['CreatorUID']));
+      $form['db']['frag_'.$looper.'_'.$frag] =
+    	array('#value' =>
+	      '<b>Added '.$created->format("M j,y H:i").' by '.$account->name.
+	      ':</b><br>'.$fragment['Complaint']);
+      $frag++;
+    }
+
+    if ($readonly) {
+      $form['db']['edit_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['edit_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/updatesmall.png',
+	      '#name' => 'op_edit'.$entry['master']['Id'],
+	      '#submit' => array('chpcomp_list_form_submit'));
+    }
+    if ($solveable) {
+      $form['db']['solve_'.$looper] = array('#value' => '');
+    } else {
+      $form['db']['solve_'.$looper] =
+	array('#type' => 'image_button',
+	      '#src' => drupal_get_path('module', 'anai').'/finalsmall.png',
+	      '#name' => 'op_solve'.$entry['master']['Id'],
+	      '#submit' => array('chpcomp_list_form_submit'));
+    }
+    $looper++;
+  }
+  return $form;
+}
+
+function theme_chpcomp_list_table($form) {
+  // Table Header
+  $header = array('Created', 'By', 'Id', COMPLAINT_NAME, '', '');
+  // Table Rows
+  $rows = array();
+  foreach ($form as $key => $value) {
+    if (!strstr($key, 'numfrags_')) {
+      continue;
+    }
+    $looper = substr($key, strlen('numfrags_'));
+    $looper = substr($looper, 0, strpos($looper, '_'));
+    $numfrags = substr($key, strlen('numfrags_'.$looper.'_'));
+    $rows[] = array(array('data' => drupal_render($form['time_'.$looper]),
+			  'rowspan' => 1 + $numfrags),
+		    array('data' => drupal_render($form['user_'.$looper]),
+			  'rowspan' => 1 + $numfrags),
+		    array('data' => drupal_render($form['compid_'.$looper]),
+			  'rowspan' => 1 + $numfrags),
+		    drupal_render($form['complaint_'.$looper]),
+		    array('data' => drupal_render($form['edit_'.$looper]),
+			  'rowspan' => 1 + $numfrags,
+			  'width' => 1, 'height' => 1),
+		    array('data' => drupal_render($form['solve_'.$looper]),
+			  'rowspan' => 1 + $numfrags,
+			  'width' => 1, 'height' => 1));
+    for ($i = 0; $i < $numfrags; $i++) {
+      $rows[] = array(drupal_render($form['frag_'.$looper.'_'.$i]));
+    }
+  }
+  // Render Table
+  return theme_table($header, $rows);
+}
+
+function chpcomp_edit_form($form_state) {
+  global $user;
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $complaint = chdbcomp_get_complaint_id($id);
+
+  drupal_set_title(t('Edit').' '.strtolower(COMPLAINT_NAME));
+
+  $form['Master'] =
+    array('#type' => 'textarea',
+  	  '#title' => COMPLAINT_NAME,
+  	  '#disabled' => TRUE,
+  	  '#default_value' => $complaint['Complaint']);
+
+  $fragments = chdbcomp_get_complaint
+    ($complaint['CompanyId'],
+     $complaint['PropertyId'],
+     $complaint['LotId'],
+     $complaint['ComplaintId'],
+     TRUE, TRUE);
+
+  foreach ($fragments as $fragment) {
+    $updated = chpuser_datetime_utc_to_usertimezone($fragment['CreateTime']);
+    $account = user_load(array('uid' => $fragment['CreatorUID']));
+    $form['Frag'][] =
+      array('#type' => 'textarea',
+	    '#title' => t('<b>Addition '.$updated->format("M j,y H:i").' by '.$account->name.'</b>'),
+	    '#disabled' => TRUE,
+	    '#default_value' => decode_entities($fragment['Complaint']));
+  }
+
+  $form['Complaint'] =
+    array('#type' => 'textarea',
+  	  '#title' => t('Addition'),
+  	  '#maxlength' => 2048);
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+  	  '#validate' => array('chpcomp_edit_form_validate_save'),
+	  '#submit' => array('chpcomp_edit_form_submit_save'));
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+  	  '#submit' => array('chpcomp_edit_form_submit_back'));
+
+  if (user_access('anai chp delete complaints')) {
+    $form['delete'] =
+      array('#type' => 'image_button',
+	    '#src' => drupal_get_path('module', 'anai').'/delete.png',
+  	    '#validate' => array('chpcomp_edit_form_validate_delete'));
+  }
+  return $form;
+}
+
+function chpcomp_edit_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['Complaint'])) {
+    form_set_error('Complaint', 'Addition field is required.');
+    return;
+  }
+}
+
+function chpcomp_edit_form_validate_delete($form, &$form_state) {
+  $form_state['storage']['delete'] = TRUE;
+}
+
+function chpcomp_edit_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+}
+
+function chpcomp_edit_form_submit_save($form, &$form_state) {
+  $id = $form_state['storage']['id'];
+  global $user;
+  if (chdbcomp_update_complaint
+      ($id, $user->uid, check_plain($form_state['values']['Complaint']))) {
+    drupal_set_message('Could not update', 'error');
+    return;
+  }
+
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+}
+
+function chpcomp_solve_form($form_state) {
+  global $user;
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  $complaint = chdbcomp_get_complaint_id($id);
+
+  drupal_set_title(t('Solve').' '.strtolower(COMPLAINT_NAME));
+
+  $form['Master'] =
+    array('#type' => 'textarea',
+  	  '#title' => COMPLAINT_NAME,
+  	  '#disabled' => TRUE,
+  	  '#default_value' => decode_entities($complaint['Complaint']));
+
+  $fragments = chdbcomp_get_complaint
+    ($complaint['CompanyId'],
+     $complaint['PropertyId'],
+     $complaint['LotId'],
+     $complaint['ComplaintId'],
+     TRUE, TRUE);
+
+  foreach ($fragments as $fragment) {
+    $updated = chpuser_datetime_utc_to_usertimezone($fragment['CreateTime']);
+    $account = user_load(array('uid' => $fragment['CreatorUID']));
+    $form['Frag'][] =
+      array('#type' => 'textarea',
+	    '#title' => t('<b>Addition '.$updated->format("M j,y H:i").' by '.$account->name.'</b>'),
+	    '#disabled' => TRUE,
+	    '#default_value' => decode_entities($fragment['Complaint']));
+  }
+
+  $form['Resolution'] =
+    array('#type' => 'textarea',
+  	  '#title' => t('Resolution'),
+  	  '#maxlength' => 512);
+
+  $form['save'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/save.png',
+  	  '#validate' => array('chpcomp_solve_form_validate_save'),
+	  '#submit' => array('chpcomp_solve_form_submit_save'));
+  $form['back'] =
+    array('#type' => 'image_button',
+	  '#src' => drupal_get_path('module', 'anai').'/cancel.png',
+  	  '#submit' => array('chpcomp_solve_form_submit_back'));
+  return $form;
+}
+
+function chpcomp_solve_form_validate_save($form, &$form_state) {
+  if (empty($form_state['values']['Resolution'])) {
+    form_set_error('Resolution', 'Resolution field is required.');
+    return;
+  }
+}
+
+function chpcomp_solve_form_submit_back($form, &$form_state) {
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+}
+
+function chpcomp_solve_form_submit_save($form, &$form_state) {
+  $id = $form_state['storage']['id']; //drupal_set_message('Id:'.$id);
+  global $user;
+  if (chdbcomp_solve_complaint
+      ($id, $user->uid, check_plain($form_state['values']['Resolution']))) {
+    drupal_set_message('Could not update resolution', 'error');
+    return;
+  }
+  unset($form_state['storage']);
+  $form_state['redirect'] = 'chpcomplist';
+}
+
+function chpcomp_list_form_submit($form, &$form_state) {
+  if ($form_state['storage']['confirm_delete']) {
+    $id = $form_state['storage']['id'];
+    global $user;
+    if (chdbcomp_retire_complaint($id, $user->uid)) {
+      drupal_set_message('Could not delete', 'error');
+      return;
+    }
+    unset($form_state['storage']);
+    $form_state['redirect'] = 'chpcomplist';
+    return;
+  }
+  if ($form_state['storage']['delete']) {
+    unset($form_state['storage']['delete']);
+    $form_state['storage']['confirm_delete'] = TRUE;
+    return;
+  }
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_edit')) {
+      $id = substr($key, strlen('op_edit'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['detailed_edit'] = TRUE;
+    return;
+  }
+  $id = -1;
+  foreach ($form_state['values'] as $key => $value) {
+    if (strstr($key, 'op_solve')) {
+      $id = substr($key, strlen('op_solve'));
+      break;
+    }
+  }
+  if ($id > 0) {
+    $form_state['storage']['id'] = $id;
+    $form_state['storage']['solve'] = TRUE;
+    return;
+  }
+}
+
+
+
